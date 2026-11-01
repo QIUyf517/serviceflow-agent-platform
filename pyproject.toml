@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend", "."]
+markers = ["postgres: requires TEST_DATABASE_URL pointing to isolated PostgreSQL test DB"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["data", ".python", ".venv", ".venv312"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
