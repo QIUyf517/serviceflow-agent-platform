@@ -83,6 +83,13 @@ class ChatTraceRow(Base):
     token_usage: Mapped[dict[str, Any] | None] = mapped_column(payload_type, nullable=True)
 
 
+class ConversationRow(Base):
+    __tablename__ = "agent_conversations"
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), primary_key=True)
+    messages: Mapped[list[dict[str, Any]]] = mapped_column(payload_type)
+    pending_proposal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 def engine_for(url: str, *, testing: bool = False) -> Engine:
     parsed = make_url(url)
     if parsed.get_backend_name() == "sqlite":
@@ -121,6 +128,7 @@ def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -
             for table in (
                 AuditRow,
                 ChatTraceRow,
+                ConversationRow,
                 ProposalRow,
                 SessionRow,
                 OrderRow,

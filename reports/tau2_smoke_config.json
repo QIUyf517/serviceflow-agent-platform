@@ -1,0 +1,50 @@
+{
+  "kind": "official_tau2_retail_text",
+  "phase": "smoke",
+  "upstream_commit": "da0835f6c67baef58bdda18f2a3b037dfb3a1754",
+  "data_sha256": {
+    "db.json": "413a65160adbdb5fde0ffc0015c49b6d70250b10c18128de169b597af7766765",
+    "policy.md": "2c9652afbce57d6e087768d37cda64d31c53d50b3e3225cfdb791bac66466467",
+    "tasks.json": "8e03ebce7901bd6218e7a7dc3105faa9324091a68058f7fe61c65262868812e8",
+    "split_tasks.json": "ed0580ec52575b63fbf76568af42490da6ee7783ecb4aa81af46961291358f20"
+  },
+  "task_split": "train",
+  "task_ids": [
+    "0",
+    "1"
+  ],
+  "agent": "serviceflow_single",
+  "adapter_revision": "confirmation-v2",
+  "agent_provider": "openai_compatible",
+  "agent_model": "deepseek-flash",
+  "agent_base_url": "https://api.deepseek.com",
+  "agent_temperature": 0.0,
+  "agent_seed": null,
+  "user_model": "deepseek/deepseek-flash",
+  "user_model_args": {
+    "temperature": 0,
+    "extra_body": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  },
+  "task_selection": "first judge-free train tasks in official order",
+  "seed": 42,
+  "num_trials": 1,
+  "max_steps": 40,
+  "max_concurrency": 1,
+  "scoring": "upstream_default",
+  "agent_input_usd_per_million": null,
+  "agent_output_usd_per_million": null,
+  "pricing": {
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "rates_usd_per_million": {
+      "cache_hit_input": 0.003,
+      "cache_miss_input": 0.15,
+      "output": 0.6
+    },
+    "basis": "documented off-peak estimate; not provider invoice"
+  },
+  "run_id": "initial"
+}

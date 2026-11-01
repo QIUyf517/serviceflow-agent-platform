@@ -4,10 +4,13 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.database import engine_for
+from app.database import ChatTraceRow, engine_for
+from app.llm import OpenAICompatibleProvider, ProviderError
 from app.service import Action, BusinessError, RetailService
 
 app = FastAPI(title="ServiceFlow", version="0.2.0")
@@ -36,6 +39,11 @@ def business_error(_request: Any, exc: BusinessError) -> JSONResponse:
 @app.exception_handler(SQLAlchemyError)
 def database_error(_request: Any, _exc: SQLAlchemyError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"error": {"code": "database_unavailable"}})
+
+
+@app.exception_handler(ProviderError)
+def provider_error(_request: Any, exc: ProviderError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"error": {"code": str(exc)}})
 
 
 def session_id(x_session_id: str = Header()) -> str:
@@ -122,7 +130,37 @@ def chat(
     service: RetailService = Depends(get_service),
 ) -> dict[str, Any]:
     from app.agent import chat_once
+    from app.live_agent import live_chat
 
     if not request.message.strip():
         raise HTTPException(422, detail="message_required")
-    return chat_once(service, sid, request.message, request.proposal_id)
+    settings = Settings()
+    if settings.agent_provider == "mock":
+        return chat_once(service, sid, request.message, request.proposal_id)
+    provider = OpenAICompatibleProvider(settings)
+    return live_chat(
+        service,
+        sid,
+        request.message,
+        request.proposal_id,
+        provider,
+        max_tool_calls=settings.agent_max_tool_calls,
+    )
+
+
+@app.get("/api/v1/traces/{trace_id}")
+def trace(
+    trace_id: str, sid: str = Depends(session_id), service: RetailService = Depends(get_service)
+) -> dict[str, Any]:
+    with Session(service.engine) as db:
+        row = db.scalar(
+            select(ChatTraceRow).where(ChatTraceRow.id == trace_id, ChatTraceRow.session_id == sid)
+        )
+        if row is None:
+            raise BusinessError("trace_not_found", 404)
+        return {
+            "trace_id": trace_id,
+            "events": row.events,
+            "elapsed_ms": row.elapsed_ms,
+            "token_usage": row.token_usage,
+        }

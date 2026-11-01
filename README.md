@@ -137,3 +137,50 @@ $env:TEST_DATABASE_URL = (.venv312/Scripts/python -c "from app.config import Set
 PostgreSQL 测试创建/清理 `phase0_*` 与 `phase1_*` 临时 schema；普通测试使用 SQLite 替身。`scripts.eval_baseline` 是独立 schema 的任务 ID 烟测入口，输出 `task_completed:null`，不得当作官方评分。细节与限制见 [阶段 1 报告](docs/PHASE1_REPORT.md)。
 
 Windows 环境：Docker Desktop 安装至 `D:\Docker`，引擎已启动，容器数据磁盘确认为 `D:\DockerData\disk\docker_data.vhdx`。数据库容器保持运行；若当前终端尚未更新 PATH，可使用 `& 'D:/Docker/resources/bin/docker.exe' compose up -d --wait db`。停止数据库用 `docker compose stop db`，保留数据卷以便后续使用。
+
+## 阶段 1.5：真实 LLM 与官方文本评估
+
+Mock 仍为默认模式。真实模型通过兼容 OpenAI Chat Completions 的 Tool Calling 接口调用；当前已用 `.env` 中的 DeepSeek 配置实测。将以下配置写入**未跟踪的** `.env`，不要提交密钥：
+
+```dotenv
+AGENT_PROVIDER=openai_compatible
+AGENT_MODEL=deepseek-flash
+AGENT_BASE_URL=https://api.deepseek.com
+AGENT_API_KEY=<your-key>
+```
+
+现有 `LLM_API_KEY`、`LLM_MODEL_ID`、`LLM_BASE_URL` 也能作为回退配置。若使用其他兼容 Provider，替换模型和地址即可。Mock 模式设置 `AGENT_PROVIDER=mock`，不需要密钥。真实模型的查询和写操作均调用服务端工具；写操作先返回具体提案，客户须在同一会话发送 `yes` 和对应 `proposal_id` 才执行。会话消息和工具轨迹保存在 PostgreSQL；通过 `GET /api/v1/traces/{trace_id}` 携带原会话的 `x-session-id` 读取。会话 ID 是访问凭据。
+
+```powershell
+# API 已启动且已有经核验会话 $s 时
+$h = @{ 'x-session-id' = $s.session_id }
+$body = @{ message = 'Please check order #W0000000' } | ConvertTo-Json
+$turn = Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/chat -Headers $h -ContentType application/json -Body $body
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/traces/$($turn.trace_id)" -Headers $h
+# 写操作返回 proposal_id 后：
+$confirm = @{ message = 'yes'; proposal_id = '<returned-proposal-id>' } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/chat -Headers $h -ContentType application/json -Body $confirm
+```
+
+`scripts.verify_live_workflows` 从固定的公开 Retail 快照创建临时 PostgreSQL schema，执行查询、取消、地址修改及退货，结束删除 schema；不会修改正式演示表。真实调用会产生少量 API 费用。
+
+```powershell
+.venv312/Scripts/python -m scripts.verify_live_workflows
+```
+
+官方适配器依赖固定 commit `da0835f6c67baef58bdda18f2a3b037dfb3a1754` 的独立 τ-bench 安装，不能混用产品数据库。先克隆该 commit 到被忽略的 `vendor/tau2-bench` 并安装到独立 Python 环境；脚本会核对 Git HEAD、四个官方原始文件哈希。以下命令会生成固定任务清单；加 `--run` 才调用真实模型。官方用户模拟器也使用 DeepSeek，密钥从同一个 `.env` 读取。
+
+```powershell
+git clone https://github.com/sierra-research/tau2-bench.git vendor/tau2-bench
+git -C vendor/tau2-bench checkout da0835f6c67baef58bdda18f2a3b037dfb3a1754
+.venv/Scripts/uv venv --python 3.12 .venv_tau
+.venv/Scripts/uv pip install --python .venv_tau/Scripts/python.exe -e backend -e vendor/tau2-bench pytest ruff
+.venv_tau/Scripts/python -m scripts.run_tau2_baseline --phase smoke
+.venv_tau/Scripts/python -m scripts.run_tau2_baseline --phase smoke --run
+.venv_tau/Scripts/python -m scripts.run_tau2_baseline --phase baseline --run
+.venv_tau/Scripts/python -m scripts.run_tau2_baseline --phase baseline --summarize-only
+# 单独重复一次并保留新轨迹
+.venv_tau/Scripts/python -m scripts.run_tau2_baseline --phase baseline --run --run-id repeat2
+```
+
+当前固定样本为 Retail `train` 中按官方顺序选出的前 10 项无 `communicate_info` 的原始任务，烟测是其中前 2 项；这是因为上游默认语义裁判需要单独的 OpenAI 裁判密钥。样本选择已记录，**不能把本样本成绩称作官方完整 Retail 成绩**。脚本不修改官方任务、工具或评分器，也不把任务答案传给 Agent。产品评估结果位于 `reports/raw/product_live/`，官方结果位于 `reports/raw/official/`；两者单独统计。详见 [阶段 1.5 报告](docs/PHASE1_5_REPORT.md)。

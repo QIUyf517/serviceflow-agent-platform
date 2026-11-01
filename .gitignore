@@ -1,6 +1,7 @@
 .env
 .venv/
 .venv312/
+.venv_tau/
 .python/
 .uv-cache/
 *.egg-info/

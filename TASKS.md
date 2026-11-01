@@ -77,6 +77,20 @@ Git：本次开始时整个 `ServiceFlow/` 为未跟踪规划包，本次未创�
 
 本阶段在独立测试 schema 验证真实 PostgreSQL 读写；完整测试 **26 passed**、ruff 通过，本机 Uvicorn 健康接口返回 200。实现查询、取消、地址/支付/商品修改、退货和换货的确定性规则、提案确认和审计；Mock LangGraph 演示身份核验→查询→取消确认。官方评分与真实 LLM 测试未进行，评估入口只输出未评定指标。详见 `docs/PHASE1_REPORT.md`；未进入阶段 2。
 
+## 阶段 1.5：真实 LLM 单 Agent 与 τ-bench 评估接入
+
+- [x] 检查 Git 状态和忽略规则，排除密钥后建立阶段 1 本地提交；未推送远程。
+- [x] 保留 Mock；加入可配置的真实 Tool Calling Provider、完整对话状态、结构化结果及轨迹。
+- [x] 服务端继续承担身份、授权、提案确认、事务和幂等校验；真实模型不直接写数据库。
+- [x] 使用独立 PostgreSQL schema 实测真实 DeepSeek 查询、取消、地址修改和退货，结束清理。
+- [x] 实现官方 τ-bench 文本 Agent 适配器，核验固定 commit、原始文件哈希和任务划分。
+- [x] 运行官方小样本联调；成功与失败轨迹分开保留。
+- [x] 固定 10 项官方原始训练任务、模型、用户模拟器、随机种子、步数和评分配置，运行初步基线。
+- [x] 产品与官方评估分别记录成功率、工具调用、延迟、Token、成本估计及失败信息。
+- [x] pytest 与 ruff 通过，更新 README 和阶段报告。
+
+验收范围、样本选择限制和实际指标见 `docs/PHASE1_5_REPORT.md`。本轮停止于阶段 1.5，不进入阶段 2。
+
 ## 阶段 2：多 Agent 与策略检索
 
 - [ ] 用 LangGraph 实现 Triage、Order、Policy、Resolution 四个专业节点，以及确定性 Guard/Executor（可从 2 个 Agent 起步再扩展）。
