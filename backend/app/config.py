@@ -9,6 +9,18 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://serviceflow:serviceflow_local@localhost:5432/serviceflow_demo"
     )
+    checkpoint_pool_min_size: int = 1
+    checkpoint_pool_max_size: int = 5
+    checkpoint_pool_timeout_seconds: float = 10.0
+    execution_max_retries: int = 3
+    execution_retry_base_seconds: float = 0.05
+    execution_retry_max_seconds: float = 0.5
+    execution_lease_seconds: int = 30
+    execution_lock_timeout_ms: int = 2_000
+    execution_statement_timeout_ms: int = 10_000
+    operator_demo_token: SecretStr | None = None
+    operator_demo_id: str = "operator-demo"
+    approval_ttl_seconds: int = 86_400
     agent_provider: Literal["mock", "openai_compatible"] = "mock"
     agent_model: str = "gpt-4.1-mini"
     agent_base_url: str = "https://api.openai.com/v1"

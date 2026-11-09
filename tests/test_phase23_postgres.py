@@ -83,5 +83,5 @@ def test_real_postgres_order_agent_readonly_scenarios():
     finally:
         Base.metadata.drop_all(isolated)
         with engine.begin() as connection:
-            connection.exec_driver_sql(f'DROP SCHEMA "{schema}"')
+            connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
         engine.dispose()

@@ -4,13 +4,17 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     create_engine,
     event,
+    inspect,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine, make_url
@@ -108,6 +112,10 @@ class ExecutionRequestRow(Base):
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[int] = mapped_column(Integer)
+    lease_owner: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_attempt_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ConfirmationRecordRow(Base):
@@ -199,6 +207,167 @@ class ConversationRow(Base):
     pending_proposal_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class TicketRow(Base):
+    """Durable human-handoff ticket without customer profile fields."""
+
+    __tablename__ = "tickets"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('unsupported_request', 'high_risk', 'rule_conflict', "
+            "'execution_failed', 'clarification_exhausted', "
+            "'customer_requested_human')",
+            name="ck_tickets_category",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'assigned', 'in_progress', 'waiting_customer', "
+            "'resolved', 'closed', 'cancelled')",
+            name="ck_tickets_status",
+        ),
+        CheckConstraint(
+            "close_reason IS NULL OR close_reason IN ('resolved_by_agent', "
+            "'resolved_by_operator', 'customer_unresponsive', 'duplicate', "
+            "'rejected', 'out_of_scope')",
+            name="ck_tickets_close_reason",
+        ),
+        CheckConstraint(
+            "status <> 'closed' OR (closed_at IS NOT NULL AND close_reason IS NOT NULL)",
+            name="ck_tickets_closed_fields",
+        ),
+        Index("ix_tickets_status_created_at", "status", "created_at"),
+        Index("ix_tickets_category_created_at", "category", "created_at"),
+        Index("ix_tickets_assignee_created_at", "assignee", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_no: Mapped[str] = mapped_column(String, unique=True, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.source_user_id"), nullable=True, index=True
+    )
+    order_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orders.source_order_id"), nullable=True, index=True
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("execution_requests.id"), nullable=True, index=True
+    )
+    category: Mapped[str] = mapped_column(String)
+    severity: Mapped[str] = mapped_column(String)
+    priority: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)
+    reason_code: Mapped[str] = mapped_column(String)
+    summary: Mapped[str] = mapped_column(Text)
+    requested_action: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    agent_state_digest: Mapped[str] = mapped_column(String)
+    assignee: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)
+    closed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    close_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String, unique=True, index=True)
+
+
+class MessageRow(Base):
+    """Normalized conversation message retained alongside the phase-2 JSON record."""
+
+    __tablename__ = "messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant', 'system', 'operator')",
+            name="ck_messages_role",
+        ),
+        CheckConstraint("sequence > 0", name="ck_messages_sequence_positive"),
+        UniqueConstraint("session_id", "sequence", name="uq_messages_session_sequence"),
+        Index("ix_messages_session_created_at", "session_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"))
+    ticket_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tickets.id"), nullable=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String)
+    content: Mapped[str] = mapped_column(Text)
+    meta: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    trace_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[int] = mapped_column(Integer)
+
+
+class ApprovalRow(Base):
+    """Operator decision record; it never substitutes for customer confirmation."""
+
+    __tablename__ = "approvals"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'expired')",
+            name="ck_approvals_status",
+        ),
+        UniqueConstraint(
+            "ticket_id", "request_id", "action", name="uq_approvals_ticket_request_action"
+        ),
+        Index(
+            "uq_approvals_ticket_action_without_request",
+            "ticket_id",
+            "action",
+            unique=True,
+            postgresql_where=text("request_id IS NULL"),
+            sqlite_where=text("request_id IS NULL"),
+        ),
+        Index("ix_approvals_ticket_created_at", "ticket_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id"), index=True)
+    request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("execution_requests.id"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(String)
+    proposed_params: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    status: Mapped[str] = mapped_column(String, index=True)
+    operator_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    decided_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[int] = mapped_column(Integer)
+
+
+class AuditEventRow(Base):
+    """Unified append-only ticket, handoff, approval and recovery audit stream."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('ticket_created', 'ticket_assigned', "
+            "'ticket_status_changed', 'approval_requested', 'approval_decided', "
+            "'handoff_started', 'handoff_returned', 'recovery_attempted', "
+            "'recovery_succeeded', 'recovery_failed')",
+            name="ck_audit_events_event_type",
+        ),
+        CheckConstraint(
+            "actor IN ('user', 'agent', 'operator', 'system')",
+            name="ck_audit_events_actor",
+        ),
+        Index("ix_audit_events_ticket_created_at", "ticket_id", "created_at"),
+        Index("ix_audit_events_session_created_at", "session_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    ticket_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tickets.id"), nullable=True, index=True
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        ForeignKey("execution_requests.id"), nullable=True, index=True
+    )
+    order_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orders.source_order_id"), nullable=True, index=True
+    )
+    actor: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    created_at: Mapped[int] = mapped_column(Integer)
+
+
 def engine_for(url: str, *, testing: bool = False) -> Engine:
     parsed = make_url(url)
     if parsed.get_backend_name() == "sqlite":
@@ -218,6 +387,35 @@ def engine_for(url: str, *, testing: bool = False) -> Engine:
     return create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
 
 
+def ensure_execution_reliability_schema(engine: Engine) -> None:
+    """Non-destructively add phase-3 lease columns to an existing phase-2 table."""
+    schema = engine.get_execution_options().get("schema_translate_map", {}).get(None)
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.exec_driver_sql("SELECT pg_advisory_xact_lock(58326003)")
+        existing = {
+            column["name"]
+            for column in inspect(connection).get_columns(
+                ExecutionRequestRow.__tablename__, schema=schema
+            )
+        }
+        quote = engine.dialect.identifier_preparer.quote
+        table = quote(ExecutionRequestRow.__tablename__)
+        if schema is not None:
+            table = f"{quote(schema)}.{table}"
+        additions = {
+            "lease_owner": "VARCHAR",
+            "lease_expires_at": "INTEGER",
+            "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "last_attempt_at": "INTEGER",
+        }
+        for column, ddl in additions.items():
+            if column not in existing:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN {quote(column)} {ddl}"
+                )
+
+
 def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -> dict[str, int]:
     from sqlalchemy import delete, func, insert, select
 
@@ -235,6 +433,10 @@ def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -
             ):
                 raise DataError("Unmanaged nonempty demo tables; explicit --reset required")
             for table in (
+                AuditEventRow,
+                ApprovalRow,
+                MessageRow,
+                TicketRow,
                 ExecutionAuditRow,
                 ConfirmationRecordRow,
                 ExecutionRequestRow,

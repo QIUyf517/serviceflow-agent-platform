@@ -159,5 +159,5 @@ def test_postgres_cancel_concurrency_and_unconfirmed_safety():
     finally:
         Base.metadata.drop_all(isolated)
         with engine.begin() as connection:
-            connection.exec_driver_sql(f'DROP SCHEMA "{schema}"')
+            connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
         engine.dispose()

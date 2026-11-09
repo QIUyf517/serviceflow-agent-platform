@@ -1,11 +1,13 @@
 """Typed LangGraph state; business authorization remains in RetailService."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 from operator import add
 from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from langchain_core.messages import AnyMessage, BaseMessage
+from langgraph.channels import UntrackedValue
 from langgraph.graph.message import add_messages
 from pydantic import (
     ConfigDict,
@@ -87,8 +89,8 @@ class AgentState(TypedDict):
     current_task: StrictStr | None
     order_id: StrictStr | None
     order_context: OrderContext | None
-    policy_context: list[PolicyEvidence]
-    policy_retrieval: SearchResult | None
+    policy_context: Annotated[list[PolicyEvidence], UntrackedValue]
+    policy_retrieval: Annotated[SearchResult | None, UntrackedValue]
     pending_action: PendingAction | None
     user_confirmed: StrictBool
     tool_results: Annotated[list[ToolResult], add]
@@ -101,7 +103,7 @@ class AgentState(TypedDict):
     missing_information: list[StrictStr]
     task_status: FlowStatus | None
     trace: Annotated[list[TraceEvent], add]
-    order_data: dict[StrictStr, OrderQueryResult]
+    order_data: Annotated[dict[StrictStr, OrderQueryResult], UntrackedValue]
     resolution_proposal: ResolutionProposal | None
     eligibility_result: EligibilityResult | None
     risk_flags: list[StrictStr]
@@ -178,6 +180,52 @@ def begin_server_trace(state: AgentState) -> AgentState:
     candidate = deepcopy(state)
     candidate["trace_id"] = uuid4().hex
     return cast(AgentState, _STATE_ADAPTER.validate_python(candidate, strict=True))
+
+
+def restore_agent_state(
+    values: Mapping[str, object],
+    session_id: str,
+    *,
+    user_id: str | None,
+    messages: list[AnyMessage] | None = None,
+) -> AgentState:
+    """Rebuild a full state from a checkpoint while rebinding server identity.
+
+    Untracked values are intentionally absent from PostgreSQL checkpoints and are
+    supplied from normalized messages or recomputed from authoritative services.
+    """
+    checkpoint_session = values.get("session_id")
+    checkpoint_thread = values.get("thread_id")
+    checkpoint_user = values.get("user_id")
+    if checkpoint_session not in (None, session_id) or checkpoint_thread not in (
+        None,
+        session_id,
+    ):
+        raise ValueError("checkpoint_session_mismatch")
+    if checkpoint_user not in (None, user_id):
+        raise ValueError("checkpoint_identity_mismatch")
+    candidate = new_agent_state(session_id, user_id=user_id)
+    for key, value in values.items():
+        if key in candidate and key not in {
+            "session_id",
+            "thread_id",
+            "user_id",
+            "identity_verified",
+        }:
+            candidate[key] = deepcopy(value)
+    candidate["session_id"] = session_id
+    candidate["thread_id"] = session_id
+    candidate["user_id"] = user_id
+    candidate["identity_verified"] = user_id is not None
+    if "messages" not in values:
+        candidate["messages"] = deepcopy(messages or [])
+    candidate["order_data"] = {}
+    candidate["policy_context"] = []
+    candidate["policy_retrieval"] = None
+    try:
+        return cast(AgentState, _STATE_ADAPTER.validate_python(candidate, strict=True))
+    except ValidationError as exc:
+        raise ValueError("checkpoint_state_invalid") from exc
 
 
 def bind_session_identity(state: AgentState, user_id: str) -> AgentState:

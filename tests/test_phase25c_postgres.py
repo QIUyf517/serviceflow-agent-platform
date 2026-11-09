@@ -110,5 +110,5 @@ def test_postgres_two_turn_conversation_and_unconfirmed_counterexample():
     finally:
         Base.metadata.drop_all(isolated)
         with engine.begin() as connection:
-            connection.exec_driver_sql(f'DROP SCHEMA "{schema}"')
+            connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
         engine.dispose()

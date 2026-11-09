@@ -1,16 +1,24 @@
 """Bounded multi-agent planning plus controlled non-LLM execution workflows."""
 
 from copy import deepcopy
-from threading import Lock
+from threading import RLock
 from time import perf_counter
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.database import SessionRow
+from app.multi_agent.checkpointing import (
+    CheckpointBackend,
+    build_checkpoint_backend,
+    checkpoint_key,
+)
 from app.multi_agent.execution import ExecutionService
+from app.multi_agent.message_store import MessageStore
 from app.multi_agent.models import TaskPlan, TriageResult
 from app.multi_agent.order_agent import run_order_agent
 from app.multi_agent.policy_agent import PolicyAgent
@@ -23,6 +31,7 @@ from app.multi_agent.state import (
     bind_session_identity,
     new_agent_state,
     reset_server_confirmation,
+    restore_agent_state,
 )
 from app.multi_agent.supervisor import MAX_ROUTES, safe_target, supervise
 from app.multi_agent.triage import TriageError, TriageProvider
@@ -30,11 +39,102 @@ from app.service import BusinessError, RetailService
 
 
 class SessionStateStore:
-    """Process-local debug state, keyed only by server session ID."""
+    """Optional state cache backed by a LangGraph checkpointer per database."""
 
     def __init__(self) -> None:
-        self.lock = Lock()
+        self.lock = RLock()
         self.states: dict[str, AgentState] = {}
+        self._backends: dict[str, CheckpointBackend] = {}
+
+    @staticmethod
+    def config(session_id: str) -> dict[str, dict[str, str]]:
+        """Create the only accepted graph config: server session ID equals thread ID."""
+        return {"configurable": {"thread_id": session_id}}
+
+    def backend_for(self, engine: Engine) -> CheckpointBackend:
+        key = checkpoint_key(engine)
+        with self.lock:
+            backend = self._backends.get(key)
+            if backend is None:
+                backend = build_checkpoint_backend(engine)
+                self._backends[key] = backend
+            return backend
+
+    def load(
+        self,
+        engine: Engine,
+        session_id: str,
+        *,
+        user_id: str | None,
+        messages: list[Any] | None = None,
+    ) -> tuple[AgentState, bool]:
+        """Load authoritative checkpoint state and hydrate transient channels."""
+        with self.lock:
+            cached = self.states.get(session_id)
+            if cached is not None:
+                if cached["thread_id"] != session_id or cached["user_id"] not in (
+                    None,
+                    user_id,
+                ):
+                    raise ValueError("checkpoint_identity_mismatch")
+                state = deepcopy(cached)
+                state["messages"] = deepcopy(messages or state["messages"])
+                return state, True
+        checkpoint = self.backend_for(engine).saver.get_tuple(self.config(session_id))
+        if checkpoint is None:
+            state = new_agent_state(session_id, user_id=user_id)
+            state["messages"] = deepcopy(messages or [])
+            return state, False
+        state = restore_agent_state(
+            checkpoint.checkpoint.get("channel_values", {}),
+            session_id,
+            user_id=user_id,
+            messages=messages,
+        )
+        with self.lock:
+            self.states[session_id] = deepcopy(state)
+        return state, True
+
+    def clear_cache(self) -> None:
+        with self.lock:
+            self.states.clear()
+
+    def update_checkpoint(
+        self, engine: Engine, session_id: str, delta: dict[str, object]
+    ) -> None:
+        """Persist a server-produced state delta created outside a graph invocation."""
+        writer = StateGraph(AgentState)
+        writer.add_node("state_writer", lambda _state: {})
+        writer.add_edge(START, "state_writer")
+        writer.add_edge("state_writer", END)
+        compiled = writer.compile(checkpointer=self.backend_for(engine).saver)
+        compiled.update_state(
+            self.config(session_id),
+            deepcopy(delta),
+            as_node="state_writer",
+        )
+
+    def close(self) -> None:
+        with self.lock:
+            backends = list(self._backends.values())
+            self._backends.clear()
+            self.states.clear()
+        for backend in backends:
+            backend.close()
+
+    def __enter__(self) -> "SessionStateStore":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        """Release psycopg pools for short-lived stores used by tests and scripts."""
+        try:
+            self.close()
+        except Exception:
+            # Interpreter shutdown may already have torn down locks or pool modules.
+            pass
 
 
 def _checked_delta(state: AgentState, delta: dict[str, object]) -> dict[str, object]:
@@ -88,6 +188,7 @@ def build_workflow(
     service: RetailService | None = None,
     policy_agent: PolicyAgent | None = None,
     resolution_generator: ResolutionGenerator | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ):
     def triage_node(state: AgentState) -> dict[str, object]:
         previous = state["triage_result"]
@@ -395,7 +496,7 @@ def build_workflow(
         },
     )
     graph.add_edge("terminal", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 def run_turn(
@@ -406,6 +507,7 @@ def run_turn(
     store: SessionStateStore,
     policy_agent: PolicyAgent | None = None,
     resolution_generator: ResolutionGenerator | None = None,
+    persist_messages: bool = True,
 ) -> dict[str, Any]:
     """Validate the server session, then run one bounded read-only graph turn."""
     began = perf_counter()
@@ -416,23 +518,50 @@ def run_turn(
         if session is None:
             raise BusinessError("session_not_found", 404)
         user_id = session.user_id
+    message_store = MessageStore(service.engine)
+    if persist_messages:
+        message_store.append(session_id, "user", message, meta={"source": "api"})
+    messages = message_store.checkpoint_messages(session_id)
+    backend = store.backend_for(service.engine)
+    graph = build_workflow(
+        triage_provider,
+        service,
+        policy_agent,
+        resolution_generator,
+        checkpointer=backend.saver,
+    )
+    config = store.config(session_id)
     with store.lock:
-        previous = store.states.get(session_id)
-        if previous is None or previous["thread_id"] != session_id:
-            previous = new_agent_state(session_id, user_id=user_id)
-        elif previous["user_id"] is None and user_id is not None:
+        previous, recovered = store.load(
+            service.engine, session_id, user_id=user_id, messages=messages
+        )
+        if previous["user_id"] is None and user_id is not None:
             previous = bind_session_identity(previous, user_id)
         elif previous["user_id"] != user_id:
-            previous = new_agent_state(session_id, user_id=user_id)
+            raise BusinessError("checkpoint_identity_mismatch", 409)
         previous = begin_server_trace(reset_server_confirmation(previous))
-        state = apply_agent_update(
-            deepcopy(previous), {"messages": [HumanMessage(content=message)]}
-        )
-        trace_offset = len(state["trace"])
-        tool_offset = len(state["tool_results"])
-        outcome: AgentState = build_workflow(
-            triage_provider, service, policy_agent, resolution_generator
-        ).invoke(state)
+        previous["messages"] = messages
+        trace_offset = len(previous["trace"])
+        tool_offset = len(previous["tool_results"])
+        if recovered:
+            graph_input: dict[str, object] = {
+                "messages": [] if not persist_messages else [messages[-1]],
+                "trace_id": previous["trace_id"],
+                "user_id": user_id,
+                "identity_verified": user_id is not None,
+                "user_confirmed": False,
+                "execution_request": None,
+                "confirmation_record": None,
+                "execution_result": None,
+                "order_data": previous["order_data"],
+                "policy_context": previous["policy_context"],
+                "policy_retrieval": previous["policy_retrieval"],
+            }
+        else:
+            graph_input = deepcopy(previous)
+        outcome: AgentState = graph.invoke(graph_input, config=config)
+        if outcome["thread_id"] != session_id:
+            raise BusinessError("checkpoint_session_mismatch", 409)
         store.states[session_id] = deepcopy(outcome)
     triage: TriageResult | None = outcome["triage_result"]
     provider = getattr(triage_provider, "provider", None)
@@ -440,7 +569,7 @@ def run_turn(
         provider = getattr(policy_agent.answerer, "provider", None)
     provider_name = type(provider).__name__ if provider is not None else "mock_local"
     token_usage = getattr(provider, "total_usage", None) or None
-    return {
+    response = {
         "input": message,
         "trace_id": outcome["trace_id"],
         "thread_id": outcome["thread_id"],
@@ -505,6 +634,15 @@ def run_turn(
         },
         "final_response": outcome["final_response"],
     }
+    if persist_messages and outcome["final_response"]:
+        message_store.append(
+            session_id,
+            "assistant",
+            outcome["final_response"],
+            meta={"task_status": outcome["task_status"]},
+            trace_id=outcome["trace_id"],
+        )
+    return response
 
 
 def _execution_tasks(
@@ -558,6 +696,7 @@ def build_execution_workflow(
     execution_service: ExecutionService,
     request_id: str,
     idempotency_key: str,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ):
     """A non-LLM continuation graph containing only the controlled executor."""
 
@@ -681,7 +820,7 @@ def build_execution_workflow(
     graph.add_edge("execution", "supervisor_result")
     graph.add_edge("supervisor_result", "terminal")
     graph.add_edge("terminal", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 def run_execution_turn(
@@ -695,7 +834,7 @@ def run_execution_turn(
     request, proposal, eligibility = execution_service.execution_context(
         session_id, request_id
     )
-    if request.status not in {"confirmed", "succeeded"}:
+    if request.status not in {"confirmed", "executing", "succeeded"}:
         code = {
             "rejected": "confirmation_rejected",
             "expired": "confirmation_expired",
@@ -709,18 +848,23 @@ def run_execution_turn(
         if session is None or session.user_id is None:
             raise BusinessError("identity_required", 403)
         user_id = session.user_id
+    message_store = MessageStore(execution_service.engine)
+    messages = message_store.checkpoint_messages(session_id)
+    backend = store.backend_for(execution_service.engine)
+    config = store.config(session_id)
     with store.lock:
-        previous = store.states.get(session_id)
-        if (
-            previous is None
-            or previous["thread_id"] != session_id
-            or previous["user_id"] != user_id
-            or (
-                previous["resolution_proposal"] is not None
-                and previous["resolution_proposal"].proposal_id != proposal.proposal_id
-            )
+        previous, recovered = store.load(
+            execution_service.engine,
+            session_id,
+            user_id=user_id,
+            messages=messages,
+        )
+        if previous["resolution_proposal"] is not None and (
+            previous["resolution_proposal"].proposal_id != proposal.proposal_id
         ):
             previous = new_agent_state(session_id, user_id=user_id)
+            previous["messages"] = messages
+            recovered = False
         tasks = _execution_tasks(
             previous["task_plan"], proposal.task_id, request.action_type
         )
@@ -744,9 +888,35 @@ def run_execution_turn(
             },
         )
         state = bind_server_confirmation(state, request, confirmation)
-        outcome: AgentState = build_execution_workflow(
-            execution_service, request_id, idempotency_key
-        ).invoke(state)
+        execution_graph = build_execution_workflow(
+            execution_service,
+            request_id,
+            idempotency_key,
+            checkpointer=backend.saver,
+        )
+        graph_input: dict[str, object] = (
+            {
+                "messages": [],
+                "trace_id": state["trace_id"],
+                "order_id": state["order_id"],
+                "order_context": state["order_context"],
+                "resolution_proposal": state["resolution_proposal"],
+                "eligibility_result": state["eligibility_result"],
+                "execution_request": state["execution_request"],
+                "confirmation_record": state["confirmation_record"],
+                "user_confirmed": state["user_confirmed"],
+                "task_plan": state["task_plan"],
+                "current_task": state["current_task"],
+                "task_status": state["task_status"],
+                "next_agent": state["next_agent"],
+                "order_data": {},
+                "policy_context": [],
+                "policy_retrieval": None,
+            }
+            if recovered
+            else state
+        )
+        outcome: AgentState = execution_graph.invoke(graph_input, config=config)
         store.states[session_id] = deepcopy(outcome)
     result = outcome["execution_result"]
     return {

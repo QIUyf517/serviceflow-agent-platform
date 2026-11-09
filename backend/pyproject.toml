@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "serviceflow"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3", "pydantic-settings>=2.7,<3", "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4", "langgraph>=1.2,<2"]
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3", "pydantic-settings>=2.7,<3", "sqlalchemy>=2.0,<3", "psycopg[binary]>=3.2,<4", "psycopg-pool>=3.2,<4", "langgraph>=1.2,<2", "langgraph-checkpoint-postgres>=3.2,<4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1", "httpx>=0.28,<1"]

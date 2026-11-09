@@ -1,7 +1,8 @@
+import secrets
 from functools import lru_cache
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -9,15 +10,34 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.database import ChatTraceRow, engine_for
+from app.database import ChatTraceRow, SessionRow, engine_for
 from app.llm import OpenAICompatibleProvider, ProviderError
 from app.multi_agent.execution import ExecutionService
+from app.multi_agent.message_store import MessageStore
 from app.multi_agent.workflow import SessionStateStore
 from app.service import Action, BusinessError, RetailService
+from app.ticketing import TicketService
 
-app = FastAPI(title="ServiceFlow", version="0.2.7")
+app = FastAPI(title="ServiceFlow", version="0.3.0")
 
 phase22_store = SessionStateStore()
+
+
+def _load_multi_agent_state(service: RetailService, sid: str):
+    """Recover state by server-owned session ID; never accept a client thread ID."""
+    with Session(service.engine) as db:
+        session = db.get(SessionRow, sid)
+        if session is None:
+            raise BusinessError("session_not_found", 404)
+        user_id = session.user_id
+    messages = MessageStore(service.engine).checkpoint_messages(sid)
+    state, _ = phase22_store.load(
+        service.engine,
+        sid,
+        user_id=user_id,
+        messages=messages,
+    )
+    return state
 
 
 class Health(BaseModel):
@@ -39,6 +59,28 @@ def get_execution_service(
     service: RetailService = Depends(get_service),
 ) -> ExecutionService:
     return ExecutionService(service.engine)
+
+
+def get_ticket_service(
+    service: RetailService = Depends(get_service),
+) -> TicketService:
+    return TicketService(service.engine)
+
+
+def operator_identity(
+    x_operator_token: str | None = Header(default=None),
+) -> str:
+    """Demo-only operator auth, deliberately independent of customer sessions."""
+    settings = Settings()
+    configured = settings.operator_demo_token
+    if configured is None:
+        raise BusinessError("operator_auth_not_configured", 503)
+    if x_operator_token is None or not secrets.compare_digest(
+        x_operator_token,
+        configured.get_secret_value(),
+    ):
+        raise BusinessError("operator_unauthorized", 401)
+    return settings.operator_demo_id
 
 
 @app.exception_handler(BusinessError)
@@ -160,6 +202,212 @@ class MultiAgentConversationRequest(BaseModel):
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class TicketCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    category: Literal["customer_requested_human"] = "customer_requested_human"
+    severity: str = Field(default="medium", min_length=1, max_length=32)
+    priority: int = Field(default=3, ge=1, le=5)
+    reason_code: str = Field(
+        default="customer_requested_human", min_length=1, max_length=128
+    )
+    summary: str = Field(min_length=1, max_length=1_000)
+    requested_action: dict[str, Any] = Field(default_factory=dict)
+    order_id: str | None = Field(default=None, min_length=1, max_length=128)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class TicketAssignRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    assignee: str = Field(min_length=1, max_length=128)
+
+
+class TicketStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: Literal[
+        "open",
+        "assigned",
+        "in_progress",
+        "waiting_customer",
+        "resolved",
+        "closed",
+        "cancelled",
+    ]
+    close_reason: Literal[
+        "resolved_by_agent",
+        "resolved_by_operator",
+        "customer_unresponsive",
+        "duplicate",
+        "rejected",
+        "out_of_scope",
+    ] | None = None
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=128)
+    proposed_params: dict[str, Any] = Field(default_factory=dict)
+    ttl_seconds: int | None = Field(default=None, ge=1, le=604_800)
+
+
+class ApprovalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: Literal["approved", "rejected"]
+    reason: str = Field(min_length=1, max_length=1_000)
+
+
+@app.post("/api/v1/tickets")
+def create_ticket(
+    request: TicketCreateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    sid: str = Depends(session_id),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    """Customer-visible handoff registration; it does not claim work is completed."""
+    result = tickets.create(
+        sid,
+        category=request.category,
+        severity=request.severity,
+        priority=request.priority,
+        reason_code=request.reason_code,
+        summary=request.summary,
+        requested_action=request.requested_action,
+        idempotency_key=idempotency_key,
+        actor="user",
+        order_id=request.order_id,
+        request_id=request.request_id,
+        agent_state={"source": "explicit_customer_request"},
+        customer_explicit=True,
+    )
+    result["message"] = f"已创建工单 {result['ticket_no']}，尚未处理完成。"
+    return result
+
+
+@app.get("/api/v1/tickets")
+def list_tickets(
+    status: str | None = None,
+    category: str | None = None,
+    assignee: str | None = None,
+    created_from: int | None = None,
+    created_to: int | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    _operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.list(
+        status=status,
+        category=category,
+        assignee=assignee,
+        created_from=created_from,
+        created_to=created_to,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@app.get("/api/v1/tickets/{ticket_id}")
+def ticket_detail(
+    ticket_id: str,
+    _operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.detail(ticket_id)
+
+
+@app.post("/api/v1/tickets/{ticket_id}/assign")
+def assign_ticket(
+    ticket_id: str,
+    request: TicketAssignRequest,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.assign(ticket_id, request.assignee, operator_id)
+
+
+@app.post("/api/v1/tickets/{ticket_id}/status")
+def change_ticket_status(
+    ticket_id: str,
+    request: TicketStatusRequest,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.change_status(
+        ticket_id,
+        request.status,
+        operator_id,
+        close_reason=request.close_reason,
+    )
+
+
+@app.post("/api/v1/tickets/{ticket_id}/approvals")
+def request_ticket_approval(
+    ticket_id: str,
+    request: ApprovalRequest,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    settings = Settings()
+    return tickets.request_approval(
+        ticket_id,
+        request_id=request.request_id,
+        action=request.action,
+        proposed_params=request.proposed_params,
+        operator_id=operator_id,
+        ttl_seconds=request.ttl_seconds or settings.approval_ttl_seconds,
+    )
+
+
+@app.post("/api/v1/tickets/{ticket_id}/approvals/{approval_id}/decision")
+def decide_ticket_approval(
+    ticket_id: str,
+    approval_id: str,
+    request: ApprovalDecisionRequest,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.decide_approval(
+        ticket_id,
+        approval_id,
+        decision=request.decision,
+        reason=request.reason,
+        operator_id=operator_id,
+    )
+
+
+@app.get("/api/v1/tickets/{ticket_id}/audit")
+def ticket_audit(
+    ticket_id: str,
+    _operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return {"ticket_id": ticket_id, "events": tickets.audit(ticket_id)}
+
+
+@app.post("/api/v1/tickets/{ticket_id}/execute")
+def operator_trigger_execution(
+    ticket_id: str,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+    execution: ExecutionService = Depends(get_execution_service),
+) -> dict[str, Any]:
+    """Trigger the existing executor; operator approval is not customer consent."""
+    sid, request_id, _action, idempotency_key = tickets.approved_execution_binding(
+        ticket_id,
+        operator_id,
+    )
+    return execution.execute_action(
+        sid,
+        request_id,
+        idempotency_key=idempotency_key,
+    ).model_dump()
+
+
 @app.post("/api/v1/debug/plan")
 def debug_plan(
     request: PlanRequest,
@@ -264,13 +512,14 @@ def current_multi_agent_task(
 def create_cancel_request(
     request: CancelExecutionRequest,
     sid: str = Depends(session_id),
+    service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
 ) -> dict[str, Any]:
     """Materialize the current eligible Resolution proposal; do not change the order."""
     with phase22_store.lock:
-        state = phase22_store.states.get(sid)
-        proposal = state["resolution_proposal"] if state else None
-        eligibility = state["eligibility_result"] if state else None
+        state = _load_multi_agent_state(service, sid)
+        proposal = state["resolution_proposal"]
+        eligibility = state["eligibility_result"]
         if (
             proposal is None
             or eligibility is None
@@ -335,13 +584,14 @@ def cancel_request_audit(
 def create_return_request(
     request: CancelExecutionRequest,
     sid: str = Depends(session_id),
+    service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
 ) -> dict[str, Any]:
     """Materialize the current eligible return proposal without changing the order."""
     with phase22_store.lock:
-        state = phase22_store.states.get(sid)
-        proposal = state["resolution_proposal"] if state else None
-        eligibility = state["eligibility_result"] if state else None
+        state = _load_multi_agent_state(service, sid)
+        proposal = state["resolution_proposal"]
+        eligibility = state["eligibility_result"]
         if (
             proposal is None
             or eligibility is None

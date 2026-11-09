@@ -1,6 +1,6 @@
 # ServiceFlow — 可信多 Agent 智能售后平台
 
-> 状态：阶段 2.5B 已完成多 Agent 订单取消的可信确认、受控执行、数据库幂等/行锁和细粒度审计闭环。修改、退货、换货仍只生成方案，不执行；人工审批、完整恢复和前端尚未实现。
+> 状态：阶段 3 已完成 PostgreSQL LangGraph checkpoint、规范化消息、执行租约恢复、工单/审批与人工接管。取消和退货继续复用同一可信确认及受控执行边界；修改/换货执行和阶段 4 前端尚未实现。
 
 ## 项目定位
 
@@ -397,4 +397,116 @@ $env:TEST_DATABASE_URL = 'postgresql+psycopg://serviceflow:serviceflow_local@127
 .venv_tau/Scripts/python -m scripts.evaluate_phase2_product_cases --output reports/phase2_6_product_cases.json
 ```
 
-产品对照脚本为每次运行创建并清理随机 PostgreSQL schema；结果不是官方 τ-bench 分数。Mock/本地编排的 Token 使用为 `null`，未填写推测成本；真实外部聊天 LLM 本轮未调用。完整实现、安全边界和实测证据见 [阶段 2.6 报告](docs/PHASE2_6_REPORT.md)。阶段 3 的完整会话持久化恢复、人工审批和前端仍未实现。
+产品对照脚本为每次运行创建并清理随机 PostgreSQL schema；结果不是官方 τ-bench 分数。Mock/本地编排的 Token 使用为 `null`，未填写推测成本；真实外部聊天 LLM 本轮未调用。阶段 2 的完整实现、安全边界和实测证据见 [阶段 2.6 报告](docs/PHASE2_6_REPORT.md)。
+
+## 阶段 3：持久化恢复、工单与人工接管
+
+阶段 3 沿用原有业务表和 `ExecutionService`，不重建或迁移 `agent_conversations`、`execution_requests`、`execution_audit_events` 的历史数据。新增表如下：
+
+| 表 | 用途 | 关键约束 |
+|---|---|---|
+| `tickets` | 脱敏人工工单 | `ticket_no`、建单幂等键唯一；关闭必须有原因 |
+| `messages` | 规范化会话消息 | `(session_id, sequence)` 唯一；按会话/时间索引 |
+| `approvals` | 操作员审批记录 | 工单/请求/动作防重复；审批不能替代客户确认 |
+| `audit_events` | 工单、接管、审批、恢复的统一追加日志 | 只写脱敏负载；不替代细粒度执行审计 |
+
+PostgreSQL 的 JSON 字段使用 JSONB，显式 SQLite 测试替身使用 JSON。实时用户、订单、支付事实不进入向量库或 checkpoint；订单事实仍只从业务数据库读取。
+
+### LangGraph checkpointer 与恢复语义
+
+生产/演示 PostgreSQL 使用官方 `langgraph-checkpoint-postgres` 的 `PostgresSaver` 和 psycopg 连接池，复用 `DATABASE_URL`。首次连接自动执行 checkpointer 的幂等 `setup()`；`thread_id` 只能由服务端设置为 `session_id`，API 不接受客户端 thread ID。
+
+```powershell
+$env:DATABASE_URL = 'postgresql+psycopg://serviceflow:serviceflow_local@127.0.0.1:5432/serviceflow_demo'
+$env:CHECKPOINT_POOL_MIN_SIZE = '1'
+$env:CHECKPOINT_POOL_MAX_SIZE = '5'
+$env:CHECKPOINT_POOL_TIMEOUT_SECONDS = '10'
+.venv_tau/Scripts/python -m uvicorn app.main:app --app-dir backend --reload
+```
+
+规范化 `messages` 是会话历史，LangGraph checkpoint 保存受限状态投影。进程重启后可以恢复多轮澄清、`task_plan` 未完成项、执行请求与等待确认绑定；缓存未命中会从 checkpoint 重建。邮箱、完整地址、支付凭据、API Key 在写 checkpoint 前脱敏。
+
+恢复不等于业务 Exactly-once。执行前仍重新校验会话身份、订单归属、确认有效期、请求状态、订单 `row_version` 和当前硬规则。`executing` 请求使用短租约；进程在租约提交后中断时，租约到期才允许其他 worker 恢复。瞬时连接/锁等待/序列化错误按配置退避重试，每次都重新读单；规则冲突、越权、订单变化和幂等冲突不重试。
+
+### 工单与审批 API
+
+客户显式建单只允许 `customer_requested_human`，使用客户 `X-Session-Id` 和独立建单幂等键。返回值明确说明工单尚未处理完成：
+
+```powershell
+$customerHeaders = @{
+  'X-Session-Id' = $sid
+  'Idempotency-Key' = 'customer-human-handoff-0001'
+}
+$ticketBody = @{
+  category = 'customer_requested_human'
+  summary = '请转人工处理此问题'
+  requested_action = @{ action = 'human_review' }
+} | ConvertTo-Json -Depth 4
+$ticket = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/tickets `
+  -Headers $customerHeaders -ContentType application/json -Body $ticketBody
+# 示例：ticket.status='open'
+#       ticket.message='已创建工单 SF-...，尚未处理完成。'
+```
+
+操作员使用独立的演示 token，不复用客户会话。该机制只用于本地演示，不是生产 IAM；真实值只放 `.env`：
+
+```powershell
+$env:OPERATOR_DEMO_TOKEN = '<local-only-token>'
+$operatorHeaders = @{ 'X-Operator-Token' = $env:OPERATOR_DEMO_TOKEN }
+
+# 分页/过滤列表
+$list = Invoke-RestMethod -Method Get `
+  -Uri 'http://127.0.0.1:8000/api/v1/tickets?status=open&limit=20&offset=0' `
+  -Headers $operatorHeaders
+
+# 分配并流转；非法迁移返回 ticket_status_transition_invalid
+$assignBody = @{ assignee = 'operator-demo' } | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8000/api/v1/tickets/$($ticket.id)/assign" `
+  -Headers $operatorHeaders -ContentType application/json -Body $assignBody
+$statusBody = @{ status = 'in_progress' } | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8000/api/v1/tickets/$($ticket.id)/status" `
+  -Headers $operatorHeaders -ContentType application/json -Body $statusBody
+```
+
+审批请求和决定示例：
+
+```powershell
+$approvalBody = @{
+  request_id = $requestId
+  action = 'execute_cancel'
+  proposed_params = @{ reason = 'ordered by mistake' }
+} | ConvertTo-Json -Depth 4
+$approval = Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8000/api/v1/tickets/$($ticket.id)/approvals" `
+  -Headers $operatorHeaders -ContentType application/json -Body $approvalBody
+# 示例：approval.status='pending'
+
+$decisionBody = @{
+  decision = 'approved'
+  reason = '已核对工单与现有请求绑定'
+} | ConvertTo-Json
+$decision = Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8000/api/v1/tickets/$($ticket.id)/approvals/$($approval.id)/decision" `
+  -Headers $operatorHeaders -ContentType application/json -Body $decisionBody
+# 示例：decision.status='approved'
+```
+
+完整接口还包括 `GET /api/v1/tickets/{ticket_id}`、`GET /api/v1/tickets/{ticket_id}/audit` 和关闭状态流转。关闭原因只能是 `resolved_by_agent`、`resolved_by_operator`、`customer_unresponsive`、`duplicate`、`rejected`、`out_of_scope`。`POST /api/v1/tickets/{ticket_id}/execute` 仅代为触发原 `ExecutionService`：必须已有操作员审批和该客户的有效确认；操作员不能创建或替代客户确认。
+
+确定性接管触发包括：不支持诉求、硬规则/模型规则冲突、高风险、写操作政策证据不足、不可重试执行失败、澄清路由上限及客户明确要求人工。工单回复只表示登记待处理，不表示订单已修改。
+
+### 故障注入与已知边界
+
+```powershell
+$env:TEST_DATABASE_URL = 'postgresql+psycopg://serviceflow:serviceflow_local@127.0.0.1:5432/serviceflow_demo'
+.venv_tau/Scripts/python -m scripts.inject_phase3_failures
+.venv_tau/Scripts/python -m pytest -q -rs -p no:cacheprovider --basetemp=.tmp/pytest-phase3-full
+.venv_tau/Scripts/python -m ruff check backend scripts tests
+```
+
+故障脚本只使用合成数据和随机 `phase3_failures_*` schema，覆盖 LLM/工具超时、并发与串行重复请求、确认后进程中断、等待确认期间订单变化，最后强制清理。2026-11-09 最终实测为 **204 passed、0 failed、0 skipped**，ruff 通过，阶段 3 和全套随机测试 schema 残留均为 0，外部 LLM 调用为 0。
+
+已知边界：阶段 3 不包含阶段 4 前端/管理后台；操作员 token 仅为本地演示；不执行修改/换货；系统不连接真实支付或通知网络；审批、checkpoint 和工单都不能替代数据库幂等、客户确认或服务端硬规则。完整证据见 [阶段 3 报告](docs/PHASE3_REPORT.md)。

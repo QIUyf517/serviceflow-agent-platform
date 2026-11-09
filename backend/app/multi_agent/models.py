@@ -36,6 +36,7 @@ FlowStatus = Literal[
     "confirmation_rejected",
     "executed",
     "execution_failed",
+    "handoff_created",
 ]
 
 EligibilityStatus = Literal["eligible", "ineligible", "unknown"]
@@ -165,6 +166,7 @@ class ExecutionRequestSummary(BaseModel):
     status: Literal[
         "pending_confirmation",
         "confirmed",
+        "executing",
         "rejected",
         "expired",
         "superseded",

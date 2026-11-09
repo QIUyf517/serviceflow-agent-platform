@@ -202,11 +202,17 @@ Git：本次开始时整个 `ServiceFlow/` 为未跟踪规划包，本次未创�
 
 ## 阶段 3：工单、持久化与人工接管
 
-- [ ] 建立 `tickets`、`conversations`、`messages`、`operation_requests`、`approvals`、`audit_events` 表。
-- [ ] 接入 LangGraph checkpointer；跨请求恢复会话、处理中任务及等待确认状态。
-- [ ] 为写操作实现幂等键、唯一约束、事务与失败补偿/重试方案。
-- [ ] 实现人工接管API；对不支持/高风险任务创建工单而非假装已处理。
-- [ ] 注入异常：超时、API重复请求、进程在确认后中断、订单状态变化。
+- [x] 建立 `tickets`、`messages`、`approvals`、`audit_events`；保留既有 `agent_conversations`、`execution_requests` 过渡兼容且不迁移历史数据。
+- [x] 接入 LangGraph PostgreSQL checkpointer；跨请求/进程恢复会话、处理中任务及等待确认状态。
+- [x] 为写操作实现幂等键、唯一约束、事务、执行租约与失败补偿/分类重试方案。
+- [x] 实现人工接管 API；对不支持/高风险/规则冲突/不可重试失败等确定性建单且不假装已处理。
+- [x] 注入异常：LLM/工具超时、并发与串行重复请求、进程在确认后中断、订单状态变化。
+
+### 阶段 3 执行记录（2026-11-09）
+
+阶段 3 最终验收使用本机 PostgreSQL 16.15 专用 `serviceflow_demo`、随机隔离 schema、SQLite 显式测试替身、FastAPI TestClient 和已安装的官方适配器：**204 passed、0 failed、0 skipped**，`ruff check backend scripts tests` 通过。最终 `phase3_%` 与全套已知随机测试 schema 残留均为 **0**；外部 LLM 调用 **0**。故障注入脚本使用合成数据，覆盖超时、重复请求、确认后中断和订单变化；未修改 τ-bench 官方数据、任务、工具或评分器。
+
+验收中两次全套运行曾为 **191 passed、13 failed**，13 项均因专用 PostgreSQL 容器在 2026-11-09 23:14（Asia/Shanghai）以 exit 255 异常退出而连接超时；`OOMKilled=false`，数据库日志没有自身 fatal/panic。重启并确认 healthy 后，同一全套测试全部通过。阶段 3 的表、恢复语义、状态机、API 与逐场景证据见 `docs/PHASE3_REPORT.md`。阶段 4 尚未开始。
 
 **验收：** 可以复现故障并稳定恢复；重复请求只产生一次业务变更。
 

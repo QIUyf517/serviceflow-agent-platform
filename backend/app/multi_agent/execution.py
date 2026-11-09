@@ -7,22 +7,25 @@ import json
 import secrets
 from collections.abc import Callable
 from copy import deepcopy
-from time import time
+from time import sleep, time
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.database import (
+    AuditEventRow,
     Base,
     ConfirmationRecordRow,
     ExecutionAuditRow,
     ExecutionRequestRow,
     UserRow,
+    ensure_execution_reliability_schema,
 )
 from app.multi_agent.models import (
     ConfirmationRecord,
@@ -35,6 +38,8 @@ from app.service import Action, BusinessError, RetailService
 
 Decision = Literal["confirm", "reject"]
 ExecutableAction = Literal["cancel", "return"]
+
+RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03", "57014", "08000", "08003", "08006"})
 
 
 def _digest(payload: object) -> str:
@@ -56,7 +61,15 @@ class ExecutionService:
         *,
         confirmation_ttl_seconds: int = 900,
         clock: Callable[[], float] = time,
+        sleeper: Callable[[float], None] = sleep,
         fault_injector: Callable[[str], None] | None = None,
+        lease_fault_injector: Callable[[str], None] | None = None,
+        max_retries: int | None = None,
+        retry_base_seconds: float | None = None,
+        retry_max_seconds: float | None = None,
+        lease_seconds: int | None = None,
+        lock_timeout_ms: int | None = None,
+        statement_timeout_ms: int | None = None,
     ) -> None:
         if confirmation_ttl_seconds < 1 or confirmation_ttl_seconds > 3600:
             raise ValueError("confirmation_ttl_invalid")
@@ -64,8 +77,48 @@ class ExecutionService:
         self.retail = RetailService(engine)
         self.confirmation_ttl_seconds = confirmation_ttl_seconds
         self.clock = clock
+        self.sleeper = sleeper
         self.fault_injector = fault_injector
+        self.lease_fault_injector = lease_fault_injector
+        settings = Settings(_env_file=None)
+        self.max_retries = (
+            settings.execution_max_retries if max_retries is None else max_retries
+        )
+        self.retry_base_seconds = (
+            settings.execution_retry_base_seconds
+            if retry_base_seconds is None
+            else retry_base_seconds
+        )
+        self.retry_max_seconds = (
+            settings.execution_retry_max_seconds
+            if retry_max_seconds is None
+            else retry_max_seconds
+        )
+        self.lease_seconds = (
+            settings.execution_lease_seconds if lease_seconds is None else lease_seconds
+        )
+        self.lock_timeout_ms = (
+            settings.execution_lock_timeout_ms
+            if lock_timeout_ms is None
+            else lock_timeout_ms
+        )
+        self.statement_timeout_ms = (
+            settings.execution_statement_timeout_ms
+            if statement_timeout_ms is None
+            else statement_timeout_ms
+        )
+        if (
+            self.max_retries < 0
+            or self.max_retries > 10
+            or self.retry_base_seconds < 0
+            or self.retry_max_seconds < self.retry_base_seconds
+            or self.lease_seconds < 1
+            or self.lock_timeout_ms < 1
+            or self.statement_timeout_ms < self.lock_timeout_ms
+        ):
+            raise ValueError("execution_reliability_config_invalid")
         Base.metadata.create_all(engine)
+        ensure_execution_reliability_schema(engine)
 
     @staticmethod
     def _validate_idempotency_key(value: str) -> str:
@@ -367,6 +420,30 @@ class ExecutionService:
                 include_confirmation_text=request.status == "pending_confirmation",
             )
 
+    def active_request(self, sid: str) -> ExecutionRequestSummary | None:
+        """Return the newest resumable request after revalidating session identity."""
+        with Session(self.engine) as db:
+            session = self.retail._session(db, sid)
+            request = db.scalar(
+                select(ExecutionRequestRow)
+                .where(
+                    ExecutionRequestRow.session_id == sid,
+                    ExecutionRequestRow.user_id == session.user_id,
+                    ExecutionRequestRow.status.in_(
+                        {"pending_confirmation", "confirmed", "executing"}
+                    ),
+                )
+                .order_by(ExecutionRequestRow.updated_at.desc(), ExecutionRequestRow.id.desc())
+            )
+            return (
+                self._summary(
+                    request,
+                    include_confirmation_text=request.status == "pending_confirmation",
+                )
+                if request is not None
+                else None
+            )
+
     def confirmation_phrases(self, sid: str, request_id: str) -> tuple[str, str]:
         """Return operation-specific phrases after rechecking the authenticated owner."""
         with Session(self.engine) as db:
@@ -564,6 +641,120 @@ class ExecutionService:
                 raise BusinessError("confirmation_required", 409)
             return self._confirmation(record)
 
+    @staticmethod
+    def _retryable_database_error(error: BaseException) -> bool:
+        if isinstance(error, OperationalError):
+            return True
+        if not isinstance(error, DBAPIError):
+            return False
+        if error.connection_invalidated:
+            return True
+        original = error.orig
+        sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+        return sqlstate in RETRYABLE_SQLSTATES
+
+    def _claim_execution(
+        self,
+        sid: str,
+        request_id: str,
+        key: str,
+        worker_id: str,
+    ) -> ExecutionResult | None:
+        """Commit a short lease before entering the business mutation transaction."""
+        now = int(self.clock())
+        with Session(self.engine) as db, db.begin():
+            session = self.retail._session(db, sid)
+            request = db.scalar(
+                select(ExecutionRequestRow)
+                .where(ExecutionRequestRow.id == request_id)
+                .with_for_update()
+            )
+            if (
+                request is None
+                or request.session_id != sid
+                or request.user_id != session.user_id
+            ):
+                raise BusinessError("execution_request_not_found", 404)
+            if not secrets.compare_digest(request.idempotency_key, key):
+                raise BusinessError("idempotency_key_conflict", 409)
+            if request.status == "succeeded" and request.result is not None:
+                replay = deepcopy(request.result)
+                replay["idempotent_replay"] = True
+                return ExecutionResult.model_validate(replay, strict=True)
+            recovering = request.status == "executing"
+            if (
+                recovering
+                and request.lease_expires_at is not None
+                and request.lease_expires_at > now
+            ):
+                raise BusinessError("execution_in_progress", 409)
+            if request.status not in {"confirmed", "executing"}:
+                code = {
+                    "rejected": "confirmation_rejected",
+                    "expired": "confirmation_expired",
+                    "failed": request.failure_reason or "execution_request_failed",
+                    "superseded": "execution_request_superseded",
+                }.get(request.status, "confirmation_required")
+                raise BusinessError(code, 409)
+            request.status = "executing"
+            request.lease_owner = worker_id
+            request.lease_expires_at = now + self.lease_seconds
+            request.attempt_count = (request.attempt_count or 0) + 1
+            request.last_attempt_at = now
+            request.updated_at = now
+            if recovering:
+                self._audit(
+                    db,
+                    request,
+                    "execution_recovery_attempted",
+                    created_at=now,
+                    failure_reason="expired_lease",
+                )
+                db.add(
+                    AuditEventRow(
+                        id=uuid4().hex,
+                        event_type="recovery_attempted",
+                        session_id=request.session_id,
+                        ticket_id=None,
+                        request_id=request.id,
+                        order_id=request.order_id,
+                        actor="system",
+                        payload={"reason": "expired_execution_lease"},
+                        created_at=now,
+                    )
+                )
+        return None
+
+    def _release_for_retry(self, sid: str, request_id: str, worker_id: str) -> None:
+        try:
+            now = int(self.clock())
+            with Session(self.engine) as db, db.begin():
+                request = db.scalar(
+                    select(ExecutionRequestRow)
+                    .where(ExecutionRequestRow.id == request_id)
+                    .with_for_update()
+                )
+                if (
+                    request is None
+                    or request.session_id != sid
+                    or request.status != "executing"
+                    or request.lease_owner != worker_id
+                ):
+                    return
+                request.status = "confirmed"
+                request.lease_owner = None
+                request.lease_expires_at = None
+                request.updated_at = now
+                self._audit(
+                    db,
+                    request,
+                    "execution_retry_scheduled",
+                    created_at=now,
+                    failure_reason="retryable_database_error",
+                )
+        except SQLAlchemyError:
+            return
+
     def _record_execution_failure(self, sid: str, request_id: str, code: str) -> None:
         try:
             now = int(self.clock())
@@ -571,9 +762,13 @@ class ExecutionService:
                 request = db.get(ExecutionRequestRow, request_id)
                 if request is None or request.session_id != sid:
                     return
+                if request.status == "succeeded":
+                    return
                 request.status = "failed"
                 request.failure_reason = code
                 request.updated_at = now
+                request.lease_owner = None
+                request.lease_expires_at = None
                 confirmation = db.scalar(
                     select(ConfirmationRecordRow).where(
                         ConfirmationRecordRow.request_id == request_id
@@ -589,6 +784,26 @@ class ExecutionService:
                     confirmation_id=confirmation.id if confirmation else None,
                     failure_reason=code,
                 )
+                recovered = db.scalar(
+                    select(ExecutionAuditRow.id).where(
+                        ExecutionAuditRow.request_id == request.id,
+                        ExecutionAuditRow.event_type == "execution_recovery_attempted",
+                    )
+                )
+                if recovered is not None:
+                    db.add(
+                        AuditEventRow(
+                            id=uuid4().hex,
+                            event_type="recovery_failed",
+                            session_id=request.session_id,
+                            ticket_id=None,
+                            request_id=request.id,
+                            order_id=request.order_id,
+                            actor="system",
+                            payload={"failure_code": code},
+                            created_at=now,
+                        )
+                    )
         except SQLAlchemyError:
             # The original database error remains authoritative; audit is best effort here.
             return
@@ -596,119 +811,167 @@ class ExecutionService:
     def execute_action(
         self, sid: str, request_id: str, *, idempotency_key: str
     ) -> ExecutionResult:
-        """Lock, revalidate and atomically execute one allowed request."""
+        """Lease, re-read, revalidate and atomically execute one allowed request."""
         key = self._validate_idempotency_key(idempotency_key)
-        try:
-            with Session(self.engine) as db, db.begin():
-                session = self.retail._session(db, sid)
-                request = db.scalar(
-                    select(ExecutionRequestRow)
-                    .where(ExecutionRequestRow.id == request_id)
-                    .with_for_update()
-                )
-                if (
-                    request is None
-                    or request.session_id != sid
-                    or request.user_id != session.user_id
-                ):
-                    raise BusinessError("execution_request_not_found", 404)
-                if not secrets.compare_digest(request.idempotency_key, key):
-                    raise BusinessError("idempotency_key_conflict", 409)
-                if request.status == "succeeded" and request.result is not None:
-                    replay = deepcopy(request.result)
-                    replay["idempotent_replay"] = True
-                    return ExecutionResult.model_validate(replay, strict=True)
-                if request.status != "confirmed":
-                    code = {
-                        "rejected": "confirmation_rejected",
-                        "expired": "confirmation_expired",
-                        "failed": request.failure_reason or "execution_request_failed",
-                        "superseded": "execution_request_superseded",
-                    }.get(request.status, "confirmation_required")
-                    raise BusinessError(code, 409)
-                if request.action not in {"cancel", "return"} or not self._binding_valid(request):
-                    raise BusinessError("proposal_binding_invalid", 409)
-                confirmation = db.scalar(
-                    select(ConfirmationRecordRow)
-                    .where(ConfirmationRecordRow.request_id == request.id)
-                    .with_for_update()
-                )
-                if (
-                    confirmation is None
-                    or confirmation.status != "valid"
-                    or confirmation.decision != "confirm"
-                    or confirmation.session_id != sid
-                    or confirmation.user_id != session.user_id
-                    or confirmation.order_id != request.order_id
-                    or confirmation.action != request.action
-                    or confirmation.proposal_id != request.proposal_id
-                    or confirmation.proposal_version != request.proposal_version
-                    or not secrets.compare_digest(
-                        confirmation.proposal_digest, request.proposal_digest
+        worker_id = uuid4().hex
+        for retry_index in range(self.max_retries + 1):
+            try:
+                replay = self._claim_execution(sid, request_id, key, worker_id)
+                if replay is not None:
+                    return replay
+                if self.lease_fault_injector is not None:
+                    self.lease_fault_injector("after_lease_acquired")
+                with Session(self.engine) as db, db.begin():
+                    if self.engine.dialect.name == "postgresql":
+                        db.execute(text(f"SET LOCAL lock_timeout = '{self.lock_timeout_ms}ms'"))
+                        db.execute(
+                            text(
+                                "SET LOCAL statement_timeout = "
+                                f"'{self.statement_timeout_ms}ms'"
+                            )
+                        )
+                    session = self.retail._session(db, sid)
+                    request = db.scalar(
+                        select(ExecutionRequestRow)
+                        .where(ExecutionRequestRow.id == request_id)
+                        .with_for_update()
                     )
-                ):
-                    raise BusinessError("confirmation_binding_invalid", 409)
-                now = int(self.clock())
-                if now > confirmation.expires_at:
-                    raise BusinessError("confirmation_expired", 409)
-                order = self.retail._own_order(
-                    db, session.user_id, request.order_id, lock=True
+                    if (
+                        request is None
+                        or request.session_id != sid
+                        or request.user_id != session.user_id
+                    ):
+                        raise BusinessError("execution_request_not_found", 404)
+                    if (
+                        request.status != "executing"
+                        or request.lease_owner != worker_id
+                        or request.lease_expires_at is None
+                        or request.lease_expires_at < int(self.clock())
+                    ):
+                        raise BusinessError("execution_lease_lost", 409)
+                    if request.action not in {"cancel", "return"} or not self._binding_valid(
+                        request
+                    ):
+                        raise BusinessError("proposal_binding_invalid", 409)
+                    confirmation = db.scalar(
+                        select(ConfirmationRecordRow)
+                        .where(ConfirmationRecordRow.request_id == request.id)
+                        .with_for_update()
+                    )
+                    if (
+                        confirmation is None
+                        or confirmation.status != "valid"
+                        or confirmation.decision != "confirm"
+                        or confirmation.session_id != sid
+                        or confirmation.user_id != session.user_id
+                        or confirmation.order_id != request.order_id
+                        or confirmation.action != request.action
+                        or confirmation.proposal_id != request.proposal_id
+                        or confirmation.proposal_version != request.proposal_version
+                        or not secrets.compare_digest(
+                            confirmation.proposal_digest, request.proposal_digest
+                        )
+                    ):
+                        raise BusinessError("confirmation_binding_invalid", 409)
+                    now = int(self.clock())
+                    if now > confirmation.expires_at:
+                        raise BusinessError("confirmation_expired", 409)
+                    order = self.retail._own_order(
+                        db, session.user_id, request.order_id, lock=True
+                    )
+                    before_status = order.status
+                    if order.row_version != request.order_version:
+                        raise BusinessError("order_changed", 409)
+                    user = db.get(UserRow, session.user_id)
+                    order_json = deepcopy(order.order_json)
+                    user_json = deepcopy(user.profile_json)
+                    action = Action.model_validate(request.arguments, strict=True)
+                    self.retail._apply(db, order_json, user_json, action)
+                    order.order_json = order_json
+                    order.status = order_json["status"]
+                    order.row_version += 1
+                    user.profile_json = user_json
+                    confirmation.status = "consumed"
+                    result = ExecutionResult(
+                        request_id=request.id,
+                        proposal_id=request.proposal_id,
+                        confirmation_id=confirmation.id,
+                        status="succeeded",
+                        action_type=request.action,
+                        order_id=order.source_order_id,
+                        before_status=before_status,
+                        after_status=order.status,
+                        row_version=order.row_version,
+                        idempotent_replay=False,
+                    )
+                    request.status = "succeeded"
+                    request.result = result.model_dump(mode="json")
+                    request.updated_at = now
+                    request.failure_reason = None
+                    request.lease_owner = None
+                    request.lease_expires_at = None
+                    if self.fault_injector is not None:
+                        self.fault_injector("before_commit")
+                    self._audit(
+                        db,
+                        request,
+                        "execution_succeeded",
+                        created_at=now,
+                        confirmation_id=confirmation.id,
+                        before_status=before_status,
+                        after_status=order.status,
+                        result=result.model_dump(mode="json"),
+                    )
+                    recovered = db.scalar(
+                        select(ExecutionAuditRow.id).where(
+                            ExecutionAuditRow.request_id == request.id,
+                            ExecutionAuditRow.event_type == "execution_recovery_attempted",
+                        )
+                    )
+                    if recovered is not None:
+                        db.add(
+                            AuditEventRow(
+                                id=uuid4().hex,
+                                event_type="recovery_succeeded",
+                                session_id=request.session_id,
+                                ticket_id=None,
+                                request_id=request.id,
+                                order_id=request.order_id,
+                                actor="system",
+                                payload={"status": "succeeded"},
+                                created_at=now,
+                            )
+                        )
+                    return result
+            except BusinessError as exc:
+                if exc.code not in {
+                    "execution_request_not_found",
+                    "idempotency_key_conflict",
+                    "confirmation_required",
+                    "confirmation_rejected",
+                    "confirmation_expired",
+                    "execution_in_progress",
+                }:
+                    self._record_execution_failure(sid, request_id, exc.code)
+                raise
+            except (SQLAlchemyError, ValidationError) as exc:
+                retryable = self._retryable_database_error(exc)
+                if retryable and retry_index < self.max_retries:
+                    self._release_for_retry(sid, request_id, worker_id)
+                    delay = min(
+                        self.retry_base_seconds * (2**retry_index),
+                        self.retry_max_seconds,
+                    )
+                    self.sleeper(delay)
+                    continue
+                code = (
+                    "execution_retry_exhausted"
+                    if retryable
+                    else "database_transaction_failed"
                 )
-                before_status = order.status
-                if order.row_version != request.order_version:
-                    raise BusinessError("order_changed", 409)
-                user = db.get(UserRow, session.user_id)
-                order_json = deepcopy(order.order_json)
-                user_json = deepcopy(user.profile_json)
-                action = Action.model_validate(request.arguments, strict=True)
-                self.retail._apply(db, order_json, user_json, action)
-                order.order_json = order_json
-                order.status = order_json["status"]
-                order.row_version += 1
-                user.profile_json = user_json
-                confirmation.status = "consumed"
-                result = ExecutionResult(
-                    request_id=request.id,
-                    proposal_id=request.proposal_id,
-                    confirmation_id=confirmation.id,
-                    status="succeeded",
-                    action_type=request.action,
-                    order_id=order.source_order_id,
-                    before_status=before_status,
-                    after_status=order.status,
-                    row_version=order.row_version,
-                    idempotent_replay=False,
-                )
-                request.status = "succeeded"
-                request.result = result.model_dump(mode="json")
-                request.updated_at = now
-                request.failure_reason = None
-                if self.fault_injector is not None:
-                    self.fault_injector("before_commit")
-                self._audit(
-                    db,
-                    request,
-                    "execution_succeeded",
-                    created_at=now,
-                    confirmation_id=confirmation.id,
-                    before_status=before_status,
-                    after_status=order.status,
-                    result=result.model_dump(mode="json"),
-                )
-                return result
-        except BusinessError as exc:
-            if exc.code not in {
-                "execution_request_not_found",
-                "idempotency_key_conflict",
-                "confirmation_required",
-                "confirmation_rejected",
-                "confirmation_expired",
-            }:
-                self._record_execution_failure(sid, request_id, exc.code)
-            raise
-        except (SQLAlchemyError, ValidationError) as exc:
-            self._record_execution_failure(sid, request_id, "database_transaction_failed")
-            raise BusinessError("database_transaction_failed", 503) from exc
+                self._record_execution_failure(sid, request_id, code)
+                raise BusinessError(code, 503) from exc
+        raise BusinessError("execution_retry_exhausted", 503)
 
     def execute_cancel(
         self, sid: str, request_id: str, *, idempotency_key: str
