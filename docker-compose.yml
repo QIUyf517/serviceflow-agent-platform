@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:0.8.7-pg16-trixie
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-serviceflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-serviceflow_local}

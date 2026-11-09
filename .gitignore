@@ -4,6 +4,8 @@
 .venv_tau/
 .python/
 .uv-cache/
+.cache/
+.tmp/
 *.egg-info/
 *.db
 .coverage

@@ -1,0 +1,625 @@
+{
+  "mode": "mock_triage_keyword_policy_local_resolution",
+  "external_llm_called": false,
+  "schema_was_disposable": true,
+  "success_case": {
+    "order_id": "#W5918442",
+    "database_status": {
+      "before": "pending",
+      "before_confirmation": "pending",
+      "after_confirmation": "cancelled"
+    },
+    "first_turn": {
+      "task_status": "pending_confirmation",
+      "request_id": "43fb8431c80c4a7288c48906050d63c5",
+      "proposal": {
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "task_id": "cancel_order-proposal",
+        "action_type": "cancel",
+        "order_id": "#W5918442",
+        "proposed_parameters": {
+          "reason": "ordered by mistake"
+        },
+        "supporting_evidence": [
+          {
+            "evidence_type": "order",
+            "source": "business_database",
+            "reference": "#W5918442",
+            "detail": "current status=pending"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-2c9dcf9609461f65d525c3ab",
+            "detail": "Cancel pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-18bf4bb4ad9f31d8bdfba40b",
+            "detail": "Modify pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-9d8b34c13776209cc4719826",
+            "detail": "Return delivered order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          }
+        ],
+        "policy_references": [
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-2c9dcf9609461f65d525c3ab",
+            "detail": "Cancel pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-18bf4bb4ad9f31d8bdfba40b",
+            "detail": "Modify pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-9d8b34c13776209cc4719826",
+            "detail": "Return delivered order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          }
+        ],
+        "missing_information": [],
+        "requires_user_confirmation": true,
+        "requires_human_review": false,
+        "eligibility_status": "eligible",
+        "risk_flags": [],
+        "status": "pending_confirmation",
+        "explanation": "Existing deterministic business rules accepted the candidate.",
+        "validated": true
+      },
+      "eligibility": {
+        "status": "eligible",
+        "validated": true,
+        "rule_code": null,
+        "checked_order_status": "pending",
+        "explanation": "Existing deterministic business rules accepted the candidate."
+      },
+      "pending_confirmation": {
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "idempotency_key": "chat-dfc9d32e5d65478691a25e3b2a3fac1a",
+        "task_id": "cancel_order-proposal",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "proposal_version": 1,
+        "proposal_digest": "3afe40cda3d42bec8982850aa9157fc038ee97451ad338819d4e88f7177d2e29",
+        "order_id": "#W5918442",
+        "action_type": "cancel",
+        "proposed_parameters": {
+          "reason": "ordered by mistake"
+        },
+        "summary": "Cancel order #W5918442; reason=ordered by mistake",
+        "status": "pending_confirmation",
+        "confirmation_expires_at": 1793790497,
+        "confirmation_text": "confirm cancel_order order=#W5918442 reason=ordered by mistake proposal=resolution_0dadf6708f39b27214e2 version=1"
+      },
+      "execution_result": null,
+      "trace": [
+        {
+          "node": "triage",
+          "status": "classified"
+        },
+        {
+          "node": "supervisor",
+          "status": "planned"
+        },
+        {
+          "node": "order",
+          "status": "completed",
+          "tool": "get_order_details",
+          "arguments": {
+            "order_id": "#W5918442"
+          }
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned"
+        },
+        {
+          "node": "policy",
+          "status": "completed",
+          "tool": "policy_keyword_search",
+          "arguments": {
+            "query": "Please cancel order #W5918442 because ordered by mistake",
+            "top_k": "3"
+          }
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned"
+        },
+        {
+          "node": "resolution",
+          "status": "completed"
+        },
+        {
+          "node": "guard",
+          "status": "eligible",
+          "tool": "validate_action_readonly"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "proposal_ready"
+        },
+        {
+          "node": "terminal",
+          "status": "proposal_ready"
+        },
+        {
+          "node": "confirmation",
+          "status": "waiting"
+        }
+      ],
+      "tool_results": [
+        {
+          "tool": "get_order_details",
+          "status": "ok",
+          "code": null
+        },
+        {
+          "tool": "policy_keyword_search",
+          "status": "ok",
+          "code": null
+        },
+        {
+          "tool": "validate_action_readonly",
+          "status": "ok",
+          "code": null
+        }
+      ],
+      "final_response": "待确认：Cancel order #W5918442; reason=ordered by mistake。如确认，请回复“确认”或回显：confirm cancel_order order=#W5918442 reason=ordered by mistake proposal=resolution_0dadf6708f39b27214e2 version=1；如拒绝，请回复“拒绝”。",
+      "metrics": {
+        "elapsed_ms": 65,
+        "node_count": 11,
+        "tool_calls": 3,
+        "nodes": [
+          "triage",
+          "supervisor",
+          "order",
+          "supervisor_result",
+          "policy",
+          "supervisor_result",
+          "resolution",
+          "guard",
+          "supervisor_result",
+          "terminal",
+          "confirmation"
+        ],
+        "provider": "mock_local",
+        "token_usage": null
+      }
+    },
+    "second_turn": {
+      "task_status": "executed",
+      "request_id": "43fb8431c80c4a7288c48906050d63c5",
+      "proposal": null,
+      "eligibility": null,
+      "pending_confirmation": {
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "idempotency_key": "chat-dfc9d32e5d65478691a25e3b2a3fac1a",
+        "task_id": "cancel_order-proposal",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "proposal_version": 1,
+        "proposal_digest": "3afe40cda3d42bec8982850aa9157fc038ee97451ad338819d4e88f7177d2e29",
+        "order_id": "#W5918442",
+        "action_type": "cancel",
+        "proposed_parameters": {
+          "reason": "ordered by mistake"
+        },
+        "summary": "Cancel order #W5918442; reason=ordered by mistake",
+        "status": "succeeded",
+        "confirmation_expires_at": 1793790497,
+        "confirmation_text": null
+      },
+      "execution_result": {
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "confirmation_id": "0e5c4c8b8b7d441881a16570bcdbdc98",
+        "status": "succeeded",
+        "action_type": "cancel",
+        "order_id": "#W5918442",
+        "before_status": "pending",
+        "after_status": "cancelled",
+        "row_version": 2,
+        "idempotent_replay": false
+      },
+      "trace": [
+        {
+          "node": "confirmation",
+          "status": "confirmed"
+        },
+        {
+          "node": "execution",
+          "status": "completed",
+          "tool": "execute_cancel_controlled",
+          "arguments": {
+            "request_id": "43fb8431c80c4a7288c48906050d63c5"
+          }
+        },
+        {
+          "node": "supervisor_result",
+          "status": "executed"
+        },
+        {
+          "node": "terminal",
+          "status": "executed"
+        }
+      ],
+      "tool_results": [
+        {
+          "tool": "confirmation_gate",
+          "status": "ok",
+          "code": null
+        },
+        {
+          "tool": "execute_cancel_controlled",
+          "status": "ok",
+          "code": null
+        }
+      ],
+      "final_response": "Order #W5918442 was cancelled successfully. Database status is cancelled; row version is 2.",
+      "metrics": {
+        "elapsed_ms": 59,
+        "node_count": 4,
+        "tool_calls": 2,
+        "nodes": [
+          "confirmation",
+          "execution",
+          "supervisor_result",
+          "terminal"
+        ],
+        "provider": "mock_local",
+        "token_usage": null
+      }
+    },
+    "audit": [
+      {
+        "event_id": "1363192990674d069107fd262028c806",
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "task_id": "cancel_order-proposal",
+        "user_id": "sofia_rossi_8776",
+        "order_id": "#W5918442",
+        "action": "cancel",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": "0e5c4c8b8b7d441881a16570bcdbdc98",
+        "event_type": "execution_succeeded",
+        "before_status": "pending",
+        "after_status": "cancelled",
+        "result": {
+          "status": "succeeded",
+          "order_id": "#W5918442",
+          "request_id": "43fb8431c80c4a7288c48906050d63c5",
+          "action_type": "cancel",
+          "proposal_id": "resolution_0dadf6708f39b27214e2",
+          "row_version": 2,
+          "after_status": "cancelled",
+          "before_status": "pending",
+          "confirmation_id": "0e5c4c8b8b7d441881a16570bcdbdc98",
+          "idempotent_replay": false
+        },
+        "failure_reason": null,
+        "created_at": 1793789597
+      },
+      {
+        "event_id": "69de126ee8fd42a1aa4c4f8ce6e322f3",
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "task_id": "cancel_order-proposal",
+        "user_id": "sofia_rossi_8776",
+        "order_id": "#W5918442",
+        "action": "cancel",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": null,
+        "event_type": "proposal_generated",
+        "before_status": null,
+        "after_status": null,
+        "result": null,
+        "failure_reason": null,
+        "created_at": 1793789597
+      },
+      {
+        "event_id": "d9ffee11843b4cecb1f1fa1d26f957e9",
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "task_id": "cancel_order-proposal",
+        "user_id": "sofia_rossi_8776",
+        "order_id": "#W5918442",
+        "action": "cancel",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": null,
+        "event_type": "eligibility_validated",
+        "before_status": null,
+        "after_status": null,
+        "result": null,
+        "failure_reason": null,
+        "created_at": 1793789597
+      },
+      {
+        "event_id": "ef93cd11da344c0ca692e9d345c5f1c4",
+        "request_id": "43fb8431c80c4a7288c48906050d63c5",
+        "task_id": "cancel_order-proposal",
+        "user_id": "sofia_rossi_8776",
+        "order_id": "#W5918442",
+        "action": "cancel",
+        "proposal_id": "resolution_0dadf6708f39b27214e2",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": "0e5c4c8b8b7d441881a16570bcdbdc98",
+        "event_type": "user_confirmed",
+        "before_status": null,
+        "after_status": null,
+        "result": null,
+        "failure_reason": null,
+        "created_at": 1793789597
+      }
+    ]
+  },
+  "unconfirmed_counterexample": {
+    "order_id": "#W2974929",
+    "database_status": "pending",
+    "turn": {
+      "task_status": "pending_confirmation",
+      "request_id": "e38906f6d3db445fa98bebd91024609e",
+      "proposal": {
+        "proposal_id": "resolution_f93d905b979874e55fd5",
+        "task_id": "cancel_order-proposal",
+        "action_type": "cancel",
+        "order_id": "#W2974929",
+        "proposed_parameters": {
+          "reason": "ordered by mistake"
+        },
+        "supporting_evidence": [
+          {
+            "evidence_type": "order",
+            "source": "business_database",
+            "reference": "#W2974929",
+            "detail": "current status=pending"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-2c9dcf9609461f65d525c3ab",
+            "detail": "Cancel pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-18bf4bb4ad9f31d8bdfba40b",
+            "detail": "Modify pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-9d8b34c13776209cc4719826",
+            "detail": "Return delivered order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          }
+        ],
+        "policy_references": [
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-2c9dcf9609461f65d525c3ab",
+            "detail": "Cancel pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-18bf4bb4ad9f31d8bdfba40b",
+            "detail": "Modify pending order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          },
+          {
+            "evidence_type": "policy",
+            "source": "data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md",
+            "reference": "policy-9d8b34c13776209cc4719826",
+            "detail": "Return delivered order (version da0835f6c67baef58bdda18f2a3b037dfb3a1754)"
+          }
+        ],
+        "missing_information": [],
+        "requires_user_confirmation": true,
+        "requires_human_review": false,
+        "eligibility_status": "eligible",
+        "risk_flags": [],
+        "status": "pending_confirmation",
+        "explanation": "Existing deterministic business rules accepted the candidate.",
+        "validated": true
+      },
+      "eligibility": {
+        "status": "eligible",
+        "validated": true,
+        "rule_code": null,
+        "checked_order_status": "pending",
+        "explanation": "Existing deterministic business rules accepted the candidate."
+      },
+      "pending_confirmation": {
+        "request_id": "e38906f6d3db445fa98bebd91024609e",
+        "idempotency_key": "chat-1f21523356d04ee08aeb206b46eca43d",
+        "task_id": "cancel_order-proposal",
+        "proposal_id": "resolution_f93d905b979874e55fd5",
+        "proposal_version": 1,
+        "proposal_digest": "6ce5081568600d3bf12416ecbfee0bd601664d3b023f429c1bd567fb82f22169",
+        "order_id": "#W2974929",
+        "action_type": "cancel",
+        "proposed_parameters": {
+          "reason": "ordered by mistake"
+        },
+        "summary": "Cancel order #W2974929; reason=ordered by mistake",
+        "status": "pending_confirmation",
+        "confirmation_expires_at": 1793790497,
+        "confirmation_text": "confirm cancel_order order=#W2974929 reason=ordered by mistake proposal=resolution_f93d905b979874e55fd5 version=1"
+      },
+      "execution_result": null,
+      "trace": [
+        {
+          "node": "triage",
+          "status": "classified"
+        },
+        {
+          "node": "supervisor",
+          "status": "planned"
+        },
+        {
+          "node": "order",
+          "status": "completed",
+          "tool": "get_order_details",
+          "arguments": {
+            "order_id": "#W2974929"
+          }
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned"
+        },
+        {
+          "node": "policy",
+          "status": "completed",
+          "tool": "policy_keyword_search",
+          "arguments": {
+            "query": "Please cancel order #W2974929 because ordered by mistake",
+            "top_k": "3"
+          }
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned"
+        },
+        {
+          "node": "resolution",
+          "status": "completed"
+        },
+        {
+          "node": "guard",
+          "status": "eligible",
+          "tool": "validate_action_readonly"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "proposal_ready"
+        },
+        {
+          "node": "terminal",
+          "status": "proposal_ready"
+        },
+        {
+          "node": "confirmation",
+          "status": "waiting"
+        }
+      ],
+      "tool_results": [
+        {
+          "tool": "get_order_details",
+          "status": "ok",
+          "code": null
+        },
+        {
+          "tool": "policy_keyword_search",
+          "status": "ok",
+          "code": null
+        },
+        {
+          "tool": "validate_action_readonly",
+          "status": "ok",
+          "code": null
+        }
+      ],
+      "final_response": "待确认：Cancel order #W2974929; reason=ordered by mistake。如确认，请回复“确认”或回显：confirm cancel_order order=#W2974929 reason=ordered by mistake proposal=resolution_f93d905b979874e55fd5 version=1；如拒绝，请回复“拒绝”。",
+      "metrics": {
+        "elapsed_ms": 39,
+        "node_count": 11,
+        "tool_calls": 3,
+        "nodes": [
+          "triage",
+          "supervisor",
+          "order",
+          "supervisor_result",
+          "policy",
+          "supervisor_result",
+          "resolution",
+          "guard",
+          "supervisor_result",
+          "terminal",
+          "confirmation"
+        ],
+        "provider": "mock_local",
+        "token_usage": null
+      }
+    },
+    "audit": [
+      {
+        "event_id": "9a8f5d90dbf3443a8840da31fe7a5629",
+        "request_id": "e38906f6d3db445fa98bebd91024609e",
+        "task_id": "cancel_order-proposal",
+        "user_id": "fatima_anderson_2157",
+        "order_id": "#W2974929",
+        "action": "cancel",
+        "proposal_id": "resolution_f93d905b979874e55fd5",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": null,
+        "event_type": "eligibility_validated",
+        "before_status": null,
+        "after_status": null,
+        "result": null,
+        "failure_reason": null,
+        "created_at": 1793789597
+      },
+      {
+        "event_id": "d0b76b1f4fd2400f9a5e938bd6f0e559",
+        "request_id": "e38906f6d3db445fa98bebd91024609e",
+        "task_id": "cancel_order-proposal",
+        "user_id": "fatima_anderson_2157",
+        "order_id": "#W2974929",
+        "action": "cancel",
+        "proposal_id": "resolution_f93d905b979874e55fd5",
+        "eligibility": {
+          "status": "eligible",
+          "rule_code": null,
+          "validated": true,
+          "explanation": "Existing deterministic business rules accepted the candidate.",
+          "checked_order_status": "pending"
+        },
+        "confirmation_id": null,
+        "event_type": "proposal_generated",
+        "before_status": null,
+        "after_status": null,
+        "result": null,
+        "failure_reason": null,
+        "created_at": 1793789597
+      }
+    ]
+  }
+}

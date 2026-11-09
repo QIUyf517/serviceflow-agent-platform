@@ -1,0 +1,493 @@
+{
+  "name": "serviceflow-phase2-product-comparison",
+  "official_tau_bench_score": null,
+  "provider": "mock_local",
+  "model": "deterministic-v1",
+  "comparable_controls": [
+    "same source snapshot",
+    "random isolated PostgreSQL schema per run",
+    "same verified identity",
+    "same deterministic business rules",
+    "same trusted confirmation and ExecutionService",
+    "same natural-language input per case"
+  ],
+  "limitations": [
+    "Mock orchestration validates engineering behavior, not model quality.",
+    "The six runs are functional cases, not an official tau-bench evaluation."
+  ],
+  "results": [
+    {
+      "architecture": "single_agent",
+      "case": "query",
+      "input": "check order #W5918442 status",
+      "initial_status": "pending",
+      "final_status": "pending",
+      "first_status": "queried",
+      "final_task_status": "queried",
+      "confirmation_summary": null,
+      "trace": [
+        {
+          "node": "single_agent",
+          "tool": "get_order_status",
+          "trace_id": "c54e74ccc8674f33841fd62fe76525ae",
+          "status": "queried",
+          "elapsed_ms": 4.896200000075623
+        }
+      ],
+      "tool_calls": 1,
+      "elapsed_ms": 4.896200000075623,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [],
+      "failure_reason": null
+    },
+    {
+      "architecture": "single_agent",
+      "case": "cancel",
+      "input": "Please cancel order #W5918442 because ordered by mistake",
+      "initial_status": "pending",
+      "final_status": "cancelled",
+      "first_status": "pending_confirmation",
+      "final_task_status": "executed",
+      "confirmation_summary": "Cancel order #W5918442; reason=ordered by mistake",
+      "trace": [
+        {
+          "node": "single_agent",
+          "tool": "get_order_details",
+          "trace_id": "719b2e095e8741d1ae336227ae0d06c6",
+          "status": "pending_confirmation",
+          "elapsed_ms": 21.005299990065396
+        },
+        {
+          "node": "single_agent",
+          "tool": "policy_keyword_search",
+          "trace_id": "719b2e095e8741d1ae336227ae0d06c6",
+          "status": "pending_confirmation",
+          "elapsed_ms": 21.005299990065396
+        },
+        {
+          "node": "single_agent",
+          "tool": "validate_action_readonly",
+          "trace_id": "719b2e095e8741d1ae336227ae0d06c6",
+          "status": "pending_confirmation",
+          "elapsed_ms": 21.005299990065396
+        },
+        {
+          "node": "single_agent",
+          "tool": "execute_cancel_controlled",
+          "trace_id": "c8156c6ac6d74649a9ce13402f2cd533",
+          "status": "executed",
+          "elapsed_ms": 27.238300011958927
+        }
+      ],
+      "tool_calls": 4,
+      "elapsed_ms": 48.24360000202432,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [
+        "proposal_generated",
+        "eligibility_validated",
+        "execution_succeeded",
+        "user_confirmed"
+      ],
+      "failure_reason": null
+    },
+    {
+      "architecture": "single_agent",
+      "case": "return",
+      "input": "Please return delivered order #W4817420 under the return policy item_quantities=6777246137:1 payment_method_id=gift_card_8168843",
+      "initial_status": "delivered",
+      "final_status": "return requested",
+      "first_status": "pending_confirmation",
+      "final_task_status": "executed",
+      "confirmation_summary": "Register return request for order #W4817420; items={'6777246137': 1}; refund_method=gift_card_8168843; impact=order status becomes return requested; refund is not disbursed",
+      "trace": [
+        {
+          "node": "single_agent",
+          "tool": "get_order_details",
+          "trace_id": "62b892e349524f44929db43cd4c71c0f",
+          "status": "pending_confirmation",
+          "elapsed_ms": 20.685299998149276
+        },
+        {
+          "node": "single_agent",
+          "tool": "policy_keyword_search",
+          "trace_id": "62b892e349524f44929db43cd4c71c0f",
+          "status": "pending_confirmation",
+          "elapsed_ms": 20.685299998149276
+        },
+        {
+          "node": "single_agent",
+          "tool": "validate_action_readonly",
+          "trace_id": "62b892e349524f44929db43cd4c71c0f",
+          "status": "pending_confirmation",
+          "elapsed_ms": 20.685299998149276
+        },
+        {
+          "node": "single_agent",
+          "tool": "execute_return_controlled",
+          "trace_id": "05bf7172277d4126b2096c1149da9eb5",
+          "status": "executed",
+          "elapsed_ms": 23.66690000053495
+        }
+      ],
+      "tool_calls": 4,
+      "elapsed_ms": 44.35219999868423,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [
+        "execution_succeeded",
+        "proposal_generated",
+        "eligibility_validated",
+        "user_confirmed"
+      ],
+      "failure_reason": null
+    },
+    {
+      "architecture": "multi_agent",
+      "case": "query",
+      "input": "check order #W5918442 status",
+      "initial_status": "pending",
+      "final_status": "pending",
+      "first_status": "queried",
+      "final_task_status": "queried",
+      "confirmation_summary": null,
+      "trace": [
+        {
+          "node": "triage",
+          "status": "classified",
+          "elapsed_ms": 0.148899998748675,
+          "trace_id": "d720015c03684de5a340e00b243ef217"
+        },
+        {
+          "node": "supervisor",
+          "status": "planned",
+          "elapsed_ms": 0.10030000703409314,
+          "trace_id": "d720015c03684de5a340e00b243ef217"
+        },
+        {
+          "node": "order",
+          "status": "completed",
+          "tool": "get_order_status",
+          "arguments": {
+            "order_id": "#W5918442"
+          },
+          "elapsed_ms": 4.203799995593727,
+          "trace_id": "d720015c03684de5a340e00b243ef217",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "queried",
+          "elapsed_ms": 0.10559998918324709,
+          "trace_id": "d720015c03684de5a340e00b243ef217",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "terminal",
+          "status": "queried",
+          "elapsed_ms": 0.14600000577047467,
+          "trace_id": "d720015c03684de5a340e00b243ef217"
+        }
+      ],
+      "tool_calls": 1,
+      "elapsed_ms": 19,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [],
+      "failure_reason": null
+    },
+    {
+      "architecture": "multi_agent",
+      "case": "cancel",
+      "input": "Please cancel order #W5918442 because ordered by mistake",
+      "initial_status": "pending",
+      "final_status": "cancelled",
+      "first_status": "pending_confirmation",
+      "final_task_status": "executed",
+      "confirmation_summary": "Cancel order #W5918442; reason=ordered by mistake",
+      "trace": [
+        {
+          "node": "triage",
+          "status": "classified",
+          "elapsed_ms": 0.17559999832883477,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45"
+        },
+        {
+          "node": "supervisor",
+          "status": "planned",
+          "elapsed_ms": 0.17739998293109238,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45"
+        },
+        {
+          "node": "order",
+          "status": "completed",
+          "tool": "get_order_details",
+          "arguments": {
+            "order_id": "#W5918442"
+          },
+          "elapsed_ms": 3.4887999936472625,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned",
+          "elapsed_ms": 0.21079997532069683,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "policy",
+          "status": "completed",
+          "tool": "policy_keyword_search",
+          "arguments": {
+            "query": "Please cancel order #W5918442 because ordered by mistake",
+            "top_k": "5"
+          },
+          "elapsed_ms": 3.4827999770641327,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-policy"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned",
+          "elapsed_ms": 0.27150000096298754,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-policy"
+        },
+        {
+          "node": "resolution",
+          "status": "completed",
+          "elapsed_ms": 4.22400000388734,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-proposal"
+        },
+        {
+          "node": "guard",
+          "status": "eligible",
+          "tool": "validate_action_readonly",
+          "elapsed_ms": 3.7406000192277133,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-proposal"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "proposal_ready",
+          "elapsed_ms": 0.3225000109523535,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-proposal"
+        },
+        {
+          "node": "terminal",
+          "status": "proposal_ready",
+          "elapsed_ms": 0.2921000123023987,
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-confirmation"
+        },
+        {
+          "node": "confirmation",
+          "status": "waiting",
+          "trace_id": "3712f9b496a444b49f62a15c7b0b9d45",
+          "task_id": "cancel_order-confirmation",
+          "request_id": "592f2eeacf9f4e84976123af23a09c18",
+          "elapsed_ms": 0.6394999800249934
+        },
+        {
+          "node": "confirmation",
+          "status": "confirmed",
+          "elapsed_ms": 0.363900006050244,
+          "trace_id": "a3fff889ed7943eb8e243b9e89375a73",
+          "task_id": "cancel_order-execute",
+          "request_id": "592f2eeacf9f4e84976123af23a09c18"
+        },
+        {
+          "node": "execution",
+          "status": "completed",
+          "tool": "execute_cancel_controlled",
+          "arguments": {
+            "request_id": "592f2eeacf9f4e84976123af23a09c18"
+          },
+          "elapsed_ms": 10.477099975105375,
+          "trace_id": "a3fff889ed7943eb8e243b9e89375a73",
+          "task_id": "cancel_order-execute",
+          "request_id": "592f2eeacf9f4e84976123af23a09c18"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "executed",
+          "elapsed_ms": 0.2741999924182892,
+          "trace_id": "a3fff889ed7943eb8e243b9e89375a73",
+          "request_id": "592f2eeacf9f4e84976123af23a09c18"
+        },
+        {
+          "node": "terminal",
+          "status": "executed",
+          "elapsed_ms": 0.36059998092241585,
+          "trace_id": "a3fff889ed7943eb8e243b9e89375a73",
+          "request_id": "592f2eeacf9f4e84976123af23a09c18"
+        }
+      ],
+      "tool_calls": 5,
+      "elapsed_ms": 75,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [
+        "execution_succeeded",
+        "eligibility_validated",
+        "proposal_generated",
+        "user_confirmed"
+      ],
+      "failure_reason": null
+    },
+    {
+      "architecture": "multi_agent",
+      "case": "return",
+      "input": "Please return delivered order #W4817420 under the return policy item_quantities=6777246137:1 payment_method_id=gift_card_8168843",
+      "initial_status": "delivered",
+      "final_status": "return requested",
+      "first_status": "pending_confirmation",
+      "final_task_status": "executed",
+      "confirmation_summary": "Register return request for order #W4817420; items={'6777246137': 1}; refund_method=gift_card_8168843; impact=order status becomes return requested; refund is not disbursed",
+      "trace": [
+        {
+          "node": "triage",
+          "status": "classified",
+          "elapsed_ms": 0.17669997760094702,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a"
+        },
+        {
+          "node": "supervisor",
+          "status": "planned",
+          "elapsed_ms": 0.16170000890269876,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a"
+        },
+        {
+          "node": "order",
+          "status": "completed",
+          "tool": "get_order_details",
+          "arguments": {
+            "order_id": "#W4817420"
+          },
+          "elapsed_ms": 3.304099984234199,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned",
+          "elapsed_ms": 0.22730001364834607,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "order-lookup"
+        },
+        {
+          "node": "policy",
+          "status": "completed",
+          "tool": "policy_keyword_search",
+          "arguments": {
+            "query": "Please return delivered order #W4817420 under the return policy item_quantities=6777246137:1 payment_method_id=gift_card_8168843",
+            "top_k": "5"
+          },
+          "elapsed_ms": 3.8942000246606767,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-policy"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "planned",
+          "elapsed_ms": 0.2890000178012997,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-policy"
+        },
+        {
+          "node": "resolution",
+          "status": "completed",
+          "elapsed_ms": 7.765000016661361,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-proposal"
+        },
+        {
+          "node": "guard",
+          "status": "eligible",
+          "tool": "validate_action_readonly",
+          "elapsed_ms": 7.2444000106770545,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-proposal"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "proposal_ready",
+          "elapsed_ms": 0.32890000147745013,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-proposal"
+        },
+        {
+          "node": "terminal",
+          "status": "proposal_ready",
+          "elapsed_ms": 0.3200999926775694,
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-confirmation"
+        },
+        {
+          "node": "confirmation",
+          "status": "waiting",
+          "trace_id": "e4e1d7b7973b4b978ac5a876bca2021a",
+          "task_id": "return_order-confirmation",
+          "request_id": "30fb02f65e7a4f3fa856adbd14fdf518",
+          "elapsed_ms": 0.676199997542426
+        },
+        {
+          "node": "confirmation",
+          "status": "confirmed",
+          "elapsed_ms": 0.3454000107012689,
+          "trace_id": "13c5a8085d254597afe8d4f06055cd09",
+          "task_id": "return_order-execute",
+          "request_id": "30fb02f65e7a4f3fa856adbd14fdf518"
+        },
+        {
+          "node": "execution",
+          "status": "completed",
+          "tool": "execute_return_controlled",
+          "arguments": {
+            "request_id": "30fb02f65e7a4f3fa856adbd14fdf518"
+          },
+          "elapsed_ms": 10.797099996125326,
+          "trace_id": "13c5a8085d254597afe8d4f06055cd09",
+          "task_id": "return_order-execute",
+          "request_id": "30fb02f65e7a4f3fa856adbd14fdf518"
+        },
+        {
+          "node": "supervisor_result",
+          "status": "executed",
+          "elapsed_ms": 0.2792000013869256,
+          "trace_id": "13c5a8085d254597afe8d4f06055cd09",
+          "request_id": "30fb02f65e7a4f3fa856adbd14fdf518"
+        },
+        {
+          "node": "terminal",
+          "status": "executed",
+          "elapsed_ms": 0.44100001105107367,
+          "trace_id": "13c5a8085d254597afe8d4f06055cd09",
+          "request_id": "30fb02f65e7a4f3fa856adbd14fdf518"
+        }
+      ],
+      "tool_calls": 5,
+      "elapsed_ms": 80,
+      "provider": "mock_local",
+      "model": "deterministic-v1",
+      "token_usage": null,
+      "audit_events": [
+        "proposal_generated",
+        "eligibility_validated",
+        "user_confirmed",
+        "execution_succeeded"
+      ],
+      "failure_reason": null
+    }
+  ]
+}

@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 from app.database import Base, OrderRow, ProductRow, engine_for, seed
-from app.main import app
+from app.main import app, get_service
 from app.retail import DataError, load, validate
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
@@ -15,11 +15,15 @@ from scripts.fetch_tau_retail import COMMIT, FILES, digest, fetch, verify
 from scripts.inspect_tau_retail import RAW, inspect
 
 
-def test_health() -> None:
-    response = TestClient(app).get("/api/v1/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-    assert TestClient(app).get("/api/v1/orders/o").status_code == 422
+def test_health(service) -> None:
+    app.dependency_overrides[get_service] = lambda: service
+    try:
+        response = TestClient(app).get("/api/v1/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        assert TestClient(app).get("/api/v1/orders/o").status_code == 422
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.parametrize("mutation", ["missing", "id", "owner", "variant", "type", "status"])

@@ -1,0 +1,430 @@
+{
+  "dataset": "serviceflow-policy-retrieval-v1",
+  "source_version": "da0835f6c67baef58bdda18f2a3b037dfb3a1754",
+  "top_k": 3,
+  "keyword": {
+    "status": "completed",
+    "sample_size": 30,
+    "recall_at_3": 1.0,
+    "mrr": 0.961111,
+    "average_latency_ms": 0.961,
+    "cases": [
+      {
+        "id": "cancel-01",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 2.04
+      },
+      {
+        "id": "cancel-02",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 1.028
+      },
+      {
+        "id": "cancel-03",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.935
+      },
+      {
+        "id": "cancel-04",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Return delivered order",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.86
+      },
+      {
+        "id": "cancel-05",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.891
+      },
+      {
+        "id": "modify-01",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.807
+      },
+      {
+        "id": "modify-02",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.809
+      },
+      {
+        "id": "modify-03",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.874
+      },
+      {
+        "id": "modify-04",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.874
+      },
+      {
+        "id": "modify-05",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Domain basic",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.969
+      },
+      {
+        "id": "modify-06",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Domain basic",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.858
+      },
+      {
+        "id": "return-01",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.816
+      },
+      {
+        "id": "return-02",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.888
+      },
+      {
+        "id": "return-03",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Modify pending order",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.839
+      },
+      {
+        "id": "return-04",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Domain basic"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.868
+      },
+      {
+        "id": "return-05",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.838
+      },
+      {
+        "id": "exchange-01",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Retail agent policy",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.876
+      },
+      {
+        "id": "exchange-02",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Domain basic",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.832
+      },
+      {
+        "id": "exchange-03",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Retail agent policy",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.833
+      },
+      {
+        "id": "exchange-04",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Domain basic",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.882
+      },
+      {
+        "id": "exchange-05",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.881
+      },
+      {
+        "id": "basic-01",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Retail agent policy",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 1.023
+      },
+      {
+        "id": "basic-02",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Cancel pending order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 1.264
+      },
+      {
+        "id": "basic-03",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 1.305
+      },
+      {
+        "id": "generic-01",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Generic action rules",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "latency_ms": 1.043
+      },
+      {
+        "id": "generic-02",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "latency_ms": 0.932
+      },
+      {
+        "id": "root-01",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.849
+      },
+      {
+        "id": "root-02",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "Cancel pending order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 1.063
+      },
+      {
+        "id": "root-03",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "Modify pending order",
+          "Domain basic"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.943
+      },
+      {
+        "id": "root-04",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "latency_ms": 0.919
+      }
+    ]
+  },
+  "vector": {
+    "status": "unavailable",
+    "reason": "embedding_api_key_missing"
+  }
+}

@@ -2,7 +2,16 @@
 
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, create_engine, event
+from sqlalchemy import (
+    JSON,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    event,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -74,6 +83,77 @@ class AuditRow(Base):
     result: Mapped[dict[str, Any]] = mapped_column(payload_type)
 
 
+class ExecutionRequestRow(Base):
+    """Durable, identity-bound request for the controlled multi-agent executor."""
+
+    __tablename__ = "execution_requests"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String, unique=True, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.source_user_id"), index=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.source_order_id"), index=True)
+    action: Mapped[str] = mapped_column(String)
+    arguments: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    parameters_digest: Mapped[str] = mapped_column(String)
+    proposal_id: Mapped[str] = mapped_column(String, index=True)
+    proposal_version: Mapped[int] = mapped_column(Integer)
+    proposal_digest: Mapped[str] = mapped_column(String)
+    proposal_payload: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    task_id: Mapped[str] = mapped_column(String)
+    eligibility: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    order_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String, index=True)
+    confirmation_expires_at: Mapped[int] = mapped_column(Integer)
+    result: Mapped[dict[str, Any] | None] = mapped_column(payload_type, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)
+
+
+class ConfirmationRecordRow(Base):
+    """A server-created decision bound to exactly one request/proposal version."""
+
+    __tablename__ = "confirmation_records"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    request_id: Mapped[str] = mapped_column(
+        ForeignKey("execution_requests.id"), unique=True, index=True
+    )
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.source_user_id"))
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.source_order_id"))
+    action: Mapped[str] = mapped_column(String)
+    proposal_id: Mapped[str] = mapped_column(String)
+    proposal_version: Mapped[int] = mapped_column(Integer)
+    proposal_digest: Mapped[str] = mapped_column(String)
+    challenge_digest: Mapped[str] = mapped_column(String)
+    decision: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer)
+
+
+class ExecutionAuditRow(Base):
+    """Append-only phase 2.5B lifecycle event without customer profile data."""
+
+    __tablename__ = "execution_audit_events"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    request_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_id: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    order_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str | None] = mapped_column(String, nullable=True)
+    proposal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    eligibility: Mapped[dict[str, Any] | None] = mapped_column(payload_type, nullable=True)
+    confirmation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    before_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    after_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(payload_type, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+
+
 class ChatTraceRow(Base):
     __tablename__ = "chat_traces"
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -81,6 +161,35 @@ class ChatTraceRow(Base):
     events: Mapped[list[dict[str, Any]]] = mapped_column(payload_type)
     elapsed_ms: Mapped[int] = mapped_column(Integer)
     token_usage: Mapped[dict[str, Any] | None] = mapped_column(payload_type, nullable=True)
+
+
+class PolicyDocumentRow(Base):
+    """One immutable upstream policy version; the raw source remains read-only."""
+
+    __tablename__ = "policy_documents"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    source_path: Mapped[str] = mapped_column(String)
+    source_sha256: Mapped[str] = mapped_column(String)
+    version: Mapped[str] = mapped_column(String)
+    title: Mapped[str] = mapped_column(String)
+
+
+class PolicyChunkRow(Base):
+    """Section-aware policy text used by keyword and optional vector retrieval."""
+
+    __tablename__ = "policy_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_id", "ordinal", name="uq_policy_chunk_document_ordinal"),
+    )
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("policy_documents.id", ondelete="CASCADE"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    section: Mapped[str] = mapped_column(String)
+    heading_path: Mapped[list[str]] = mapped_column(payload_type)
+    content: Mapped[str] = mapped_column(Text)
+    content_sha256: Mapped[str] = mapped_column(String)
 
 
 class ConversationRow(Base):
@@ -126,6 +235,9 @@ def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -
             ):
                 raise DataError("Unmanaged nonempty demo tables; explicit --reset required")
             for table in (
+                ExecutionAuditRow,
+                ConfirmationRecordRow,
+                ExecutionRequestRow,
                 AuditRow,
                 ChatTraceRow,
                 ConversationRow,

@@ -29,9 +29,19 @@ class Action(BaseModel):
     order_id: str
     reason: str | None = None
     item_ids: list[str] = Field(default_factory=list)
+    item_quantities: dict[str, int] = Field(default_factory=dict)
     new_item_ids: list[str] = Field(default_factory=list)
     payment_method_id: str | None = None
     address: dict[str, str] | None = None
+
+
+class ActionValidation(BaseModel):
+    """Result of applying existing rules to detached copies only."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    eligible: bool
+    code: str | None
+    order_status: str
 
 
 class RetailService:
@@ -111,9 +121,9 @@ class RetailService:
             user = self._session(db, sid).user_id
             return deepcopy(db.get(UserRow, user).profile_json)
 
-    def product(self, sid: str, pid: str) -> dict[str, Any]:
+    def product(self, sid: str, pid: str, *, public: bool = False) -> dict[str, Any]:
         with Session(self.engine) as db:
-            self._session(db, sid)
+            self._session(db, sid, verified=not public)
             row = db.get(ProductRow, pid)
             if row is None:
                 raise BusinessError("product_not_found", 404)
@@ -197,8 +207,20 @@ class RetailService:
                 old["balance"] = round(old["balance"] + amount, 2)
         else:
             available = Counter(item["item_id"] for item in order["items"])
-            requested = Counter(action.item_ids)
-            if not action.item_ids or requested - available:
+            requested = (
+                Counter(action.item_quantities)
+                if action.item_quantities
+                else Counter(action.item_ids)
+            )
+            if any(quantity < 1 for quantity in requested.values()) or not requested:
+                raise BusinessError("items_invalid")
+            requested = Counter(
+                {
+                    item_id: action.item_quantities.get(item_id, quantity)
+                    for item_id, quantity in requested.items()
+                }
+            )
+            if requested - available:
                 raise BusinessError("items_invalid")
             if kind == "return":
                 method = self._method(user, action.payment_method_id)
@@ -211,8 +233,10 @@ class RetailService:
                     raise BusinessError("return_method_invalid")
                 order.update(
                     status="return requested",
-                    return_items=sorted(action.item_ids),
+                    return_items=sorted(requested.elements()),
+                    return_item_quantities=dict(sorted(requested.items())),
                     return_payment_method_id=action.payment_method_id,
+                    return_refund_status="requested_not_disbursed",
                 )
             else:
                 if len(action.item_ids) != len(action.new_item_ids):
@@ -268,6 +292,18 @@ class RetailService:
                     if method["source"] == "gift_card":
                         method["balance"] = round(method["balance"] - difference, 2)
                     order["status"] = "pending (item modified)"
+
+    def validate_action(self, sid: str, action: Action) -> ActionValidation:
+        """Run the same business rules as execution without persisting any mutation."""
+        with Session(self.engine) as db:
+            user_id = self._session(db, sid).user_id
+            row = self._own_order(db, user_id, action.order_id)
+            user = db.get(UserRow, user_id)
+            try:
+                self._apply(db, deepcopy(row.order_json), deepcopy(user.profile_json), action)
+            except BusinessError as exc:
+                return ActionValidation(eligible=False, code=exc.code, order_status=row.status)
+            return ActionValidation(eligible=True, code=None, order_status=row.status)
 
     def propose(self, sid: str, action: Action) -> dict[str, Any]:
         with Session(self.engine) as db, db.begin():

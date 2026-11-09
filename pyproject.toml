@@ -6,7 +6,7 @@ markers = ["postgres: requires TEST_DATABASE_URL pointing to isolated PostgreSQL
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["data", ".python", ".venv", ".venv312"]
+exclude = ["data", ".python", ".venv", ".venv312", ".venv_tau", ".cache", ".tmp"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

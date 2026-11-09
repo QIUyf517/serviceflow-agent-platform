@@ -46,6 +46,9 @@ class OpenAICompatibleProvider:
         self.transport = transport
         self.temperature = settings.agent_temperature
         self.seed = None if self.deepseek else settings.agent_seed
+        self.last_usage: dict[str, int] | None = None
+        self.total_usage: dict[str, int] = {}
+        self.last_model: str | None = None
 
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
         request: dict[str, Any] = {
@@ -80,7 +83,7 @@ class OpenAICompatibleProvider:
                     ModelToolCall(id=call["id"], name=call["function"]["name"], arguments=arguments)
                 )
             usage = data.get("usage")
-            return ModelReply(
+            reply = ModelReply(
                 content=message.get("content"),
                 tool_calls=calls,
                 usage={k: int(v) for k, v in usage.items() if isinstance(v, int)}
@@ -88,5 +91,10 @@ class OpenAICompatibleProvider:
                 else None,
                 model=data.get("model"),
             )
+            self.last_usage = reply.usage
+            self.last_model = reply.model
+            for key, value in (reply.usage or {}).items():
+                self.total_usage[key] = self.total_usage.get(key, 0) + value
+            return reply
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             raise ProviderError("model_request_failed") from exc

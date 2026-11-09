@@ -23,16 +23,37 @@ class Settings(BaseSettings):
     agent_seed: int | None = 42
     agent_input_usd_per_million: float | None = None
     agent_output_usd_per_million: float | None = None
+    policy_retrieval_strategy: Literal["keyword", "vector", "auto"] = "keyword"
+    policy_top_k: int = 3
+    policy_embedding_model: str = "text-embedding-3-small"
+    policy_embedding_dimensions: int = 1536
+    policy_embedding_base_url: str = "https://api.openai.com/v1"
+    policy_embedding_api_key: SecretStr | None = None
+    policy_embedding_batch_size: int = 32
+    policy_embedding_provider: Literal["openai_compatible", "fastembed"] = (
+        "openai_compatible"
+    )
+    policy_local_embedding_model: str = (
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    policy_local_embedding_dimensions: int = 384
+    policy_local_embedding_cache: str = ".cache/fastembed"
 
     @property
     def effective_model(self) -> str:
-        return (self.agent_model if "agent_model" in self.model_fields_set
-                else self.llm_model_id or self.agent_model)
+        return (
+            self.agent_model
+            if "agent_model" in self.model_fields_set
+            else self.llm_model_id or self.agent_model
+        )
 
     @property
     def effective_base_url(self) -> str:
-        return (self.agent_base_url if "agent_base_url" in self.model_fields_set
-                else self.llm_base_url or self.agent_base_url)
+        return (
+            self.agent_base_url
+            if "agent_base_url" in self.model_fields_set
+            else self.llm_base_url or self.agent_base_url
+        )
 
     @property
     def effective_key(self) -> SecretStr | None:

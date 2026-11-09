@@ -1,0 +1,41 @@
+{
+  "name": "serviceflow-policy-retrieval-v1",
+  "source_version": "da0835f6c67baef58bdda18f2a3b037dfb3a1754",
+  "items": [
+    {"id": "cancel-01", "query": "订单取消政策是什么？", "expected_sections": ["Cancel pending order"]},
+    {"id": "cancel-02", "query": "什么状态的订单可以撤销？", "expected_sections": ["Cancel pending order"]},
+    {"id": "cancel-03", "query": "取消订单可以填写哪些理由？", "expected_sections": ["Cancel pending order"]},
+    {"id": "cancel-04", "query": "Cancel policy: when does the refund arrive?", "expected_sections": ["Cancel pending order"]},
+    {"id": "cancel-05", "query": "误下单后能不能取消，钱会退回原支付方式吗？", "expected_sections": ["Cancel pending order"]},
+
+    {"id": "modify-01", "query": "订单修改规则有哪些？", "expected_sections": ["Modify pending order"]},
+    {"id": "modify-02", "query": "待处理订单能改收货地址吗？", "expected_sections": ["Modify pending order"]},
+    {"id": "modify-03", "query": "如何更改订单的支付方式？", "expected_sections": ["Modify pending order"]},
+    {"id": "modify-04", "query": "换成礼品卡付款时余额有什么要求？", "expected_sections": ["Modify pending order"]},
+    {"id": "modify-05", "query": "修改商品选项可以换成另一种产品吗？", "expected_sections": ["Modify pending order"]},
+    {"id": "modify-06", "query": "Can I modify item options more than once?", "expected_sections": ["Modify pending order"]},
+
+    {"id": "return-01", "query": "退货政策和条件是什么？", "expected_sections": ["Return delivered order"]},
+    {"id": "return-02", "query": "只有已送达订单才能退吗？", "expected_sections": ["Return delivered order"]},
+    {"id": "return-03", "query": "退货退款可以退到哪种付款方式？", "expected_sections": ["Return delivered order"]},
+    {"id": "return-04", "query": "申请退货必须提供哪些商品？", "expected_sections": ["Return delivered order"]},
+    {"id": "return-05", "query": "What happens after a delivered order return is confirmed?", "expected_sections": ["Return delivered order"]},
+
+    {"id": "exchange-01", "query": "换货规则是什么？", "expected_sections": ["Exchange delivered order"]},
+    {"id": "exchange-02", "query": "已送达的商品能换成不同颜色吗？", "expected_sections": ["Exchange delivered order"]},
+    {"id": "exchange-03", "query": "换货时能把衬衫换成鞋吗？", "expected_sections": ["Exchange delivered order"]},
+    {"id": "exchange-04", "query": "交换商品有差价时需要提供什么？", "expected_sections": ["Exchange delivered order"]},
+    {"id": "exchange-05", "query": "Does an exchange require placing a new order?", "expected_sections": ["Exchange delivered order"]},
+
+    {"id": "basic-01", "query": "Product ID and Item ID有什么区别？", "expected_sections": ["Domain basic"]},
+    {"id": "basic-02", "query": "订单可能有哪些状态？", "expected_sections": ["Domain basic"]},
+    {"id": "basic-03", "query": "礼品卡、PayPal和信用卡属于什么？", "expected_sections": ["Domain basic"]},
+    {"id": "generic-01", "query": "Generally which order statuses can be acted on?", "expected_sections": ["Generic action rules"]},
+    {"id": "generic-02", "query": "Can exchange or modify tools be called repeatedly?", "expected_sections": ["Generic action rules"]},
+
+    {"id": "root-01", "query": "客服开始对话时怎样核验身份？", "expected_sections": ["Retail agent policy"]},
+    {"id": "root-02", "query": "数据库写操作前是否必须明确确认？", "expected_sections": ["Retail agent policy"]},
+    {"id": "root-03", "query": "Can an agent help two different users in one conversation?", "expected_sections": ["Retail agent policy"]},
+    {"id": "root-04", "query": "什么时候应该转人工客服？", "expected_sections": ["Retail agent policy"]}
+  ]
+}

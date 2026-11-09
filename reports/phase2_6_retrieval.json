@@ -1,0 +1,984 @@
+{
+  "dataset": "serviceflow-policy-retrieval-v1",
+  "source_version": "da0835f6c67baef58bdda18f2a3b037dfb3a1754",
+  "top_k": 3,
+  "keyword": {
+    "status": "completed",
+    "sample_size": 30,
+    "recall_at_3": 1.0,
+    "mrr": 0.944444,
+    "citation_accuracy_at_3": 0.383333,
+    "citation_source_integrity": 1.0,
+    "average_latency_ms": 1.058,
+    "cases": [
+      {
+        "id": "cancel-01",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "取消订单演示",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.247
+      },
+      {
+        "id": "cancel-02",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "查询订单",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.115
+      },
+      {
+        "id": "cancel-03",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "取消订单演示",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.044
+      },
+      {
+        "id": "cancel-04",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Return delivered order",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.01
+      },
+      {
+        "id": "cancel-05",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "取消订单演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.066
+      },
+      {
+        "id": "modify-01",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.069
+      },
+      {
+        "id": "modify-02",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.281
+      },
+      {
+        "id": "modify-03",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.127
+      },
+      {
+        "id": "modify-04",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 1.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.066
+      },
+      {
+        "id": "modify-05",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Domain basic",
+          "商品与变体标识"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.055
+      },
+      {
+        "id": "modify-06",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Domain basic",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.032
+      },
+      {
+        "id": "return-01",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "退货数量表达",
+          "退货申请演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.079
+      },
+      {
+        "id": "return-02",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "取消订单演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.039
+      },
+      {
+        "id": "return-03",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Modify pending order",
+          "退货申请演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 0.992
+      },
+      {
+        "id": "return-04",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "退货申请演示",
+          "Return delivered order",
+          "退货数量表达"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.0
+      },
+      {
+        "id": "return-05",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 0.99
+      },
+      {
+        "id": "exchange-01",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "ServiceFlow 演示 FAQ",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.001
+      },
+      {
+        "id": "exchange-02",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "退货数量表达",
+          "ServiceFlow 演示商品信息说明"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.047
+      },
+      {
+        "id": "exchange-03",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Retail agent policy",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.042
+      },
+      {
+        "id": "exchange-04",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "退货数量表达",
+          "ServiceFlow 演示商品信息说明"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.054
+      },
+      {
+        "id": "exchange-05",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.0
+      },
+      {
+        "id": "basic-01",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Retail agent policy",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.024
+      },
+      {
+        "id": "basic-02",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "查询订单",
+          "取消订单演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 0.973
+      },
+      {
+        "id": "basic-03",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "安全边界"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.5,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.122
+      },
+      {
+        "id": "generic-01",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Generic action rules",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.137
+      },
+      {
+        "id": "generic-02",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.012
+      },
+      {
+        "id": "root-01",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "查询订单",
+          "安全边界"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 0.946
+      },
+      {
+        "id": "root-02",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "数据来源边界",
+          "取消订单演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.03
+      },
+      {
+        "id": "root-03",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "Modify pending order",
+          "Domain basic"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.045
+      },
+      {
+        "id": "root-04",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 1.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 1.096
+      }
+    ]
+  },
+  "vector": {
+    "status": "completed",
+    "sample_size": 30,
+    "recall_at_3": 0.833333,
+    "mrr": 0.633333,
+    "citation_accuracy_at_3": 0.277778,
+    "citation_source_integrity": 1.0,
+    "average_latency_ms": 13.674,
+    "cases": [
+      {
+        "id": "cancel-01",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "取消订单演示",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 16.196
+      },
+      {
+        "id": "cancel-02",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "取消订单演示",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.959
+      },
+      {
+        "id": "cancel-03",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "取消订单演示",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.782
+      },
+      {
+        "id": "cancel-04",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Return delivered order",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.586
+      },
+      {
+        "id": "cancel-05",
+        "expected_sections": [
+          "Cancel pending order"
+        ],
+        "retrieved_sections": [
+          "退款途径说明",
+          "Cancel pending order",
+          "退货申请演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.699
+      },
+      {
+        "id": "modify-01",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Generic action rules",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.724
+      },
+      {
+        "id": "modify-02",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Return delivered order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.728
+      },
+      {
+        "id": "modify-03",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.887
+      },
+      {
+        "id": "modify-04",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Modify pending order",
+          "退货申请演示"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.274
+      },
+      {
+        "id": "modify-05",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Generic action rules",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.315
+      },
+      {
+        "id": "modify-06",
+        "expected_sections": [
+          "Modify pending order"
+        ],
+        "retrieved_sections": [
+          "Generic action rules",
+          "Modify pending order",
+          "Exchange delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.114
+      },
+      {
+        "id": "return-01",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "退货申请演示",
+          "退款途径说明",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.059
+      },
+      {
+        "id": "return-02",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Cancel pending order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.793
+      },
+      {
+        "id": "return-03",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "退货申请演示",
+          "退款途径说明",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.981
+      },
+      {
+        "id": "return-04",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "退货申请演示",
+          "Exchange delivered order",
+          "退款途径说明"
+        ],
+        "recall_at_3": 0.0,
+        "reciprocal_rank": 0.0,
+        "citation_accuracy_at_3": 0.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 11.753
+      },
+      {
+        "id": "return-05",
+        "expected_sections": [
+          "Return delivered order"
+        ],
+        "retrieved_sections": [
+          "Return delivered order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.76
+      },
+      {
+        "id": "exchange-01",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "退货申请演示",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.711
+      },
+      {
+        "id": "exchange-02",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "商品与变体标识",
+          "ServiceFlow 演示商品信息说明"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 12.782
+      },
+      {
+        "id": "exchange-03",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Modify pending order",
+          "Return delivered order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.069
+      },
+      {
+        "id": "exchange-04",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "ServiceFlow 演示商品信息说明",
+          "退货数量表达"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.037
+      },
+      {
+        "id": "exchange-05",
+        "expected_sections": [
+          "Exchange delivered order"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "Return delivered order",
+          "Modify pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.167
+      },
+      {
+        "id": "basic-01",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "商品与变体标识",
+          "查询订单",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 0.0,
+        "reciprocal_rank": 0.0,
+        "citation_accuracy_at_3": 0.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.191
+      },
+      {
+        "id": "basic-02",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Modify pending order",
+          "Exchange delivered order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 0.0,
+        "reciprocal_rank": 0.0,
+        "citation_accuracy_at_3": 0.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.967
+      },
+      {
+        "id": "basic-03",
+        "expected_sections": [
+          "Domain basic"
+        ],
+        "retrieved_sections": [
+          "Exchange delivered order",
+          "退货申请演示",
+          "退款途径说明"
+        ],
+        "recall_at_3": 0.0,
+        "reciprocal_rank": 0.0,
+        "citation_accuracy_at_3": 0.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.891
+      },
+      {
+        "id": "generic-01",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Generic action rules",
+          "Modify pending order",
+          "Cancel pending order"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.674
+      },
+      {
+        "id": "generic-02",
+        "expected_sections": [
+          "Generic action rules"
+        ],
+        "retrieved_sections": [
+          "Generic action rules",
+          "退货数量表达",
+          "退款途径说明"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 15.291
+      },
+      {
+        "id": "root-01",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "查询订单",
+          "Retail agent policy",
+          "Domain basic"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.5,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.954
+      },
+      {
+        "id": "root-02",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "数据来源边界",
+          "取消订单演示",
+          "安全边界"
+        ],
+        "recall_at_3": 0.0,
+        "reciprocal_rank": 0.0,
+        "citation_accuracy_at_3": 0.0,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.786
+      },
+      {
+        "id": "root-03",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Retail agent policy",
+          "查询订单",
+          "Generic action rules"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 1.0,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 14.874
+      },
+      {
+        "id": "root-04",
+        "expected_sections": [
+          "Retail agent policy"
+        ],
+        "retrieved_sections": [
+          "Domain basic",
+          "Cancel pending order",
+          "Retail agent policy"
+        ],
+        "recall_at_3": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "citation_accuracy_at_3": 0.333333,
+        "citation_source_integrity": 1.0,
+        "latency_ms": 13.223
+      }
+    ],
+    "embedding_model": "fastembed:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "embedding_dimensions": 384
+  }
+}

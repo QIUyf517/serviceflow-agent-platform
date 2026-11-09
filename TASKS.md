@@ -93,14 +93,112 @@ Git：本次开始时整个 `ServiceFlow/` 为未跟踪规划包，本次未创�
 
 ## 阶段 2：多 Agent 与策略检索
 
-- [ ] 用 LangGraph 实现 Triage、Order、Policy、Resolution 四个专业节点，以及确定性 Guard/Executor（可从 2 个 Agent 起步再扩展）。
-- [ ] 为 Agent 设置独立工具白名单；跨节点传递结构化 State，不传递完整用户数据库。
-- [ ] Policy Agent v1 直接引用 `policy.md` 相关标题段落；记录证据来源。
-- [ ] 新增业务FAQ/商品手册文档集，再引入 pgvector Embedding检索，做RAG召回测试。
-- [ ] 记录 trace_id、节点耗时、工具调用、Token使用情况（无统计则标为缺失）。
-- [ ] 证明相同业务案例在单 Agent 与多 Agent 均能运行。
+### 阶段 2.1：架构设计与共享状态（2026-11-02）
+
+- [x] 核对工作区、阶段 0/1/1.5 代码与阶段 1.5 评估记录；不把现有单 Agent 成绩作为多 Agent 结果。
+- [x] 新增独立 `app.multi_agent.state.AgentState`、状态初始化及受控增量更新；明确身份/确认由服务端掌握。
+- [x] 编写共享状态与 LangGraph 消息归并测试，验证单 Agent 入口仍可导入。
+- [x] 编写 `docs/PHASE2_ARCHITECTURE.md`，给出职责、字段权限、工具白名单、错误策略与公平对照方案。
+
+阶段 2.1 完成；专业 Agent、Supervisor、Policy 检索、RAG、完整工作流及多 Agent 评估仍在后续阶段，下面阶段 2 总任务保持未完成。
+
+阶段 2.1 补充验收（2026-11-02）：完整 pytest 套件收集 **53 项，49 passed、0 failed、4 skipped**；`ruff check backend scripts tests` 与格式检查通过。共享状态、原有单 Agent、业务服务和 FastAPI API 测试均通过。跳过的 3 项 PostgreSQL 集成测试需要 `TEST_DATABASE_URL` 和运行中的 Docker 引擎；本次 Docker Desktop 虽已尝试后台启动，但 `dockerDesktopLinuxEngine` 管道不存在，数据库连接超时。另 1 项官方适配器测试因当前 `.venv312` 未安装 `tau2` 而跳过；这些测试未被删除或改为 Mock，不能把本次结果称为真实 PostgreSQL/官方适配器复验。
+
+问题根因与最小修复：受限执行环境下，pytest 默认系统临时目录无法创建编号目录；本次用工作区内全新、被 Git 忽略的 `--basetemp=.pytest_phase21_acceptance2` 完成运行。受限环境的 Windows `asyncio` 在 `socket._fallback_socketpair` 的 `accept` 等待，连无数据库依赖的健康接口也卡住；解除该本地 socket 限制后，同一 TestClient 请求立即返回 200。应用无自定义 lifespan，卡住发生在进入应用、数据库和 LLM 调用之前，不是 2.1 状态模块回归。解除限制后发现既有 `test_health` 在数据库关闭时得到 503 而非期望的缺头 422；仅将该测试接入已有 SQLite `service` fixture 并在 `finally` 清理依赖覆盖，保留真实 TestClient 请求和原断言，不改业务逻辑。
+
+可复现验收命令：`.venv312/Scripts/python -m pytest -q -rs -p no:cacheprovider -o faulthandler_timeout=30 --basetemp=.pytest_phase21_skipreasons`（需允许本地 loopback socket）；`.venv312/Scripts/python -m ruff check backend scripts tests`。待 Docker 引擎可用后，可按 README 设置 `TEST_DATABASE_URL` 再运行相同套件，以补验 3 项 PostgreSQL 测试。该记录形成时阶段 2.2 尚未开始。
+
+### 阶段 2.2：Supervisor + Triage（2026-11-02）
+
+- [x] 定义 `TriageResult` 和 `TaskPlan`，支持多意图、缺失信息和依赖计划。
+- [x] 实现 Mock/真实 Provider Triage，严格解析、有限重试及编号原文校验。
+- [x] 实现确定性 Supervisor、最大路由次数和非法目标安全兜底。
+- [x] 实现 LangGraph 最小规划图、多轮会话内存状态与独立调试 API；不执行专业节点。
+- [x] 新增 Triage、Supervisor、工作流与 API 自动化测试；更新 README 和阶段报告。
+
+阶段 2.2 完整验收：`.venv312/Scripts/python -m pytest -q -rs -p no:cacheprovider -o faulthandler_timeout=30 --basetemp=.pytest_phase22_acceptance2` 收集 **88 项，84 passed、0 failed、4 skipped**；`.venv312/Scripts/python -m ruff check backend scripts tests` 通过。跳过项与阶段 2.1 相同：3 项需要未启动的 PostgreSQL/Docker，1 项需要当前 `.venv312` 未安装的 `tau2`。真实 `deepseek-v4-flash` 合成输入烟测及首次订单号 `#` 丢失后修复情况见 `docs/PHASE2_2_REPORT.md`；不计入 pytest。阶段 2 总任务保持未完成，不开始阶段 2.3。
+
+### 阶段 2.3：Order Agent 只读订单查询（2026-11-02）
+
+- [x] 复用 `RetailService`、服务端会话和订单归属校验；只增加独立只读工具适配与严格参数模型。
+- [x] 实现 Order Agent 的确定性工具选择、受限字段投影、错误码、工具次数上限和运行轨迹。
+- [x] 将 Order Agent 接入 LangGraph 规划图，查询后经 Supervisor 结果处理安全终止；未实现的子任务保持未完成。
+- [x] 覆盖订单列表、详情、状态、商品、物流已有字段、权限隔离、多轮补号及单 Agent/API 回归。
+- [x] 使用隔离 PostgreSQL schema 补跑原先跳过的数据库测试，使用 `.venv_tau` 补跑官方适配器测试；更新 README 与阶段报告。
+
+阶段 2.3 只读查询验收记录及实际测试结果见 `docs/PHASE2_3_REPORT.md`。阶段 2 总任务仍未完成；Policy、Resolution、RAG 与写操作不属于本阶段。
+
+### 阶段 2.4：Policy Agent + RAG 政策检索（2026-11-02）
+
+- [x] 验证固定 τ-bench Retail `policy.md` 的 commit、SHA256、大小与标题结构，不修改官方原文。
+- [x] 实现 H2 业务条款 + H3 子规则聚合切分、版本元数据、幂等导入与显式重建。
+- [x] 实现可测试的关键词基线、Top-K、分数、来源与空证据处理。
+- [x] 实现可配置 Embedding Provider 与 PostgreSQL pgvector 导入/检索路径；当前环境缺 pgvector 与 Embedding Key，未伪造向量结果。
+- [x] 实现 Policy Agent、服务端引用、证据不足回答、Prompt Injection 防护和 `AgentState.policy_context` 更新。
+- [x] 接入 `Triage → Supervisor → Policy → Supervisor result`，复合任务可先完成 Order/Policy 并保留未实现任务。
+- [x] 新增 30 条标注检索集、评估脚本、单元/API/PostgreSQL/回归测试与阶段报告。
+
+阶段 2.4 验收：关键词检索 30 条实测 Recall@3 **1.000**、MRR **0.961111**、平均延迟 **0.961 ms**；向量指标为 N/A。`.venv_tau` 完整套件 **126 passed、0 skipped**，`ruff check backend scripts tests` 通过。详见 `docs/PHASE2_4_REPORT.md`。本轮不进入 2.5。
+
+### 阶段 2.5A：Resolution Agent 方案生成与决策整合（2026-11-02）
+
+- [x] 定义 `ResolutionProposal`、证据引用与独立 `EligibilityResult`，区分生成建议和确定性规则结果。
+- [x] 实现本地 Resolution 生成器，支持取消、修改、退货、换货及缺失信息识别；非法结构安全拒绝。
+- [x] 新增 `RetailService.validate_action` 只读接口，在深拷贝上复用执行硬规则，不创建操作提案或审计记录。
+- [x] 将依赖顺序调整为 Order/Policy → Resolution → Guard，并接入 LangGraph；Confirmation/Executor 保持阻塞且不执行。
+- [x] 扩展 `AgentState` 与调试 API，输出方案、资格结果、待确认信息、风险、最终回复和累计轨迹。
+- [x] 保留关键词检索回退和单 Agent/API；覆盖错误模型建议、身份/会话隔离、多轮补充、重复方案与零写入。
+- [x] 更新 README、自动化测试和 `docs/PHASE2_5A_REPORT.md`。
+
+阶段 2.5A 完整验收：本机 PostgreSQL 16 隔离 schema、`.venv_tau` 官方适配器与 FastAPI TestClient 全部纳入，**144 passed、0 skipped**；`ruff check backend scripts tests` 通过。Resolution 未调用外部 LLM，pgvector 仍未完成真实环境验证，默认关键词检索已覆盖端到端方案生成。确认、执行、人工审批、持久化恢复和前端未实现；本轮停止，不进入阶段 2.5B。详见 `docs/PHASE2_5A_REPORT.md`。
+
+### 阶段 2.5B：安全业务执行与订单取消闭环（2026-11-02）
+
+- [x] 新增与 LLM 解耦、仅允许取消的 `ExecutionService`，复用 `RetailService._apply`、身份/归属校验和数据库事务。
+- [x] 持久化执行请求、方案/参数摘要、订单版本、确认记录和数据库唯一幂等键。
+- [x] 实现服务端具体确认文本、确认/拒绝、有效期及方案/订单/用户/版本绑定；拒绝布尔确认绕过。
+- [x] 执行前重新读取并锁定订单，校验行版本、当前规则和确认绑定；成功写入真实订单状态。
+- [x] 实现重复执行结果复用、幂等键冲突拒绝、同订单并发仅一次转换及事务异常回滚。
+- [x] 新增细粒度执行审计，区分方案、资格、确认、成功执行和失败执行。
+- [x] 接入非 LLM LangGraph Confirmation Gate、Execution Node、Supervisor Result 和真实数据库结果回复。
+- [x] 新增创建/查询请求、确认/拒绝、执行、订单状态及审计查询 API。
+- [x] 完成 SQLite 单元、FastAPI、真实 PostgreSQL 隔离 schema 并发和全套回归测试；更新 README 与阶段报告。
+
+阶段 2.5B 最终验收：`.venv_tau` 完整套件 **163 passed、0 failed、0 skipped**；`ruff check backend scripts tests` 通过。真实 PostgreSQL 测试中两个确认请求并发取消同一订单，严格得到一次成功和一次 `order_changed`，订单版本只增加 1；未确认场景保持 `pending`。随机 `phase25b_*` schema 测试后残留为 0。未调用外部 LLM，未修改正式演示订单或官方 τ-bench 数据/评分器。多 Agent 修改、退货、换货执行及 2.5C 均未开始。详见 `docs/PHASE2_5B_REPORT.md`。
+
+### 阶段 2.5C：订单取消端到端 Multi-Agent 闭环（2026-11-04）
+
+- [x] 新增统一自然语言会话入口，串联既有 Triage、Supervisor、Order、Policy、Resolution、Guard、Confirmation 和 Execution 节点。
+- [x] 实现两轮取消、拒绝、重复确认、修改订单号、改变诉求、确认过期和等待期间订单状态变化的确定性状态处理。
+- [x] 将旧待确认请求持久化为 `superseded`，使旧确认失效；执行仍复用 2.5B 数据库幂等、锁、事务和审计边界。
+- [x] 禁用阶段 1 旧 HTTP 写入口及聊天布尔确认路径，新增绕过回归；保留查询型单 Agent Baseline 和内部服务契约。
+- [x] 新增当前任务查询、完整 Agent trace/工具次数/延迟输出及隔离 PostgreSQL 演示脚本。
+- [x] 新增 FastAPI 多轮、隔离、过期、状态竞争、旧 API 安全测试和 PostgreSQL 两轮测试代码。
+- [x] 更新 README 与 `docs/PHASE2_5C_REPORT.md`；未扩展修改、退货或换货执行。
+- [x] 在真实 PostgreSQL 16 随机 schema 中运行 2.5C 两轮测试和演示；确认成功写入、未确认零写入、审计完整且 schema 零残留。
+
+阶段 2.5C 最终验收：`.venv_tau` 全套 **169 passed、0 failed、0 skipped**；`ruff check backend scripts tests` 通过。新增 PostgreSQL 两轮测试 **1 passed**；演示实测成功订单从 pending 变为 cancelled，未确认反例保持 pending，成功链路 4 类审计齐全，`phase25c_*` schema 残留为 0。未调用外部 LLM，未修改官方 τ-bench 数据或评分器。详见 `docs/PHASE2_5C_REPORT.md`。
+
+- [x] 用 LangGraph 实现 Triage、Order、Policy、Resolution 四个专业节点，以及确定性 Guard/Executor（可从 2 个 Agent 起步再扩展）。
+- [x] 为 Agent 设置独立工具白名单；跨节点传递结构化 State，不传递完整用户数据库。
+- [x] Policy Agent v1 直接引用 `policy.md` 相关标题段落；记录证据来源。
+- [x] 新增业务FAQ/商品手册文档集，再引入 pgvector Embedding检索，做RAG召回测试。
+- [x] 记录 trace_id、节点耗时、工具调用、Token使用情况（无统计则标为缺失）。
+- [x] 证明相同业务案例在单 Agent 与多 Agent 均能运行。
 
 **验收：** 至少查询、取消、退货三种端到端场景；检索可溯源；无未经授权的数据写入。
+
+### 阶段 2.6：阶段 2 收尾与验收（2026-11-04）
+
+- [x] 核对全部专业节点、结构化 State 和工具白名单；跨节点写工具调用、模型自设身份/确认及文档指令绕过均被拒绝。
+- [x] 在共享 `ExecutionService` 上补齐退货申请的多轮确认、事务、行锁、硬规则重校验、数据库幂等和审计闭环；不伪报真实退款。
+- [x] 新增两份 ServiceFlow 自编非权威文档、版本/来源/SHA256 manifest、幂等导入和显式重建。
+- [x] 使用 PostgreSQL pgvector 0.8.7 与真实本地多语言 MiniLM（384 维）完成索引、Agent 路径和 30 条同标注集检索评估；保留关键词默认路径。
+- [x] 补齐 `trace_id`、任务/请求关联、逐节点实测耗时、结果/错误码、工具调用数、Provider/模型/配置和实际 Token 字段；Mock Token 为 `null`。
+- [x] 新增共享安全执行边界的受控单 Agent 入口，并在六个独立随机 schema 中完成查询、取消、退货的单/多 Agent 同案例验证。
+- [x] 运行完整 pytest 与 ruff，更新 README、报告和脱敏结果文件；未进入阶段 3。
+
+阶段 2.6 最终验收记录见 `docs/PHASE2_6_REPORT.md`。本轮完整 pytest 为 **181 passed、0 failed、0 skipped**（最终文档提交前再次复验）；真实 PostgreSQL/pgvector 退货测试使用随机 `phase26_*` schema 并清理。阶段 2 产品验收已满足，但这不是官方 τ-bench 对照实验，也不表示多 Agent 优于单 Agent。真实外部聊天 LLM 未调用；完整会话持久化恢复、前端、人工审批及阶段 3 工作保持未开始。
 
 ## 阶段 3：工单、持久化与人工接管
 

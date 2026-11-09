@@ -1,0 +1,10 @@
+# Overlay for backend[rag-local], verified on Windows/Python 3.12 on 2026-11-04.
+# Install after requirements-dev.lock. Platform wheels may differ on Linux/macOS.
+fastembed==0.9.1
+flatbuffers==25.12.19
+huggingface-hub==1.33.0
+mmh3==5.3.1
+onnxruntime==1.31.1
+pillow==13.0.0
+protobuf==7.36.2
+py-rust-stemmers==0.1.8
