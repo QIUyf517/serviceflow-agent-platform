@@ -12,6 +12,7 @@ RUN python -m pip install --upgrade pip && python -m pip install /app/backend
 
 COPY scripts /app/scripts
 COPY data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md /app/data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/policy.md
+COPY data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/manifest.json /app/data/raw/tau2/da0835f6c67baef58bdda18f2a3b037dfb3a1754/manifest.json
 COPY data/knowledge /app/data/knowledge
 
 RUN addgroup --system serviceflow && adduser --system --ingroup serviceflow serviceflow \
