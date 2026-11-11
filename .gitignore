@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 .venv312/
 .venv_tau/
@@ -16,6 +18,9 @@ __pycache__/
 .ruff_cache/
 node_modules/
 dist/
+test-results/
+playwright-report/
+.playwright/
 vendor/
 data/raw/
 data/processed/

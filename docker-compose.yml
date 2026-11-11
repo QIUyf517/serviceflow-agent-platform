@@ -1,12 +1,27 @@
+name: flowagent
+
+x-backend-environment: &backend-environment
+  OPERATOR_DEMO_ID: ${OPERATOR_DEMO_ID:-operator-demo}
+  AGENT_PROVIDER: mock
+  POLICY_RETRIEVAL_STRATEGY: keyword
+  CHECKPOINT_POOL_MIN_SIZE: ${CHECKPOINT_POOL_MIN_SIZE:-1}
+  CHECKPOINT_POOL_MAX_SIZE: ${CHECKPOINT_POOL_MAX_SIZE:-5}
+  CHECKPOINT_POOL_TIMEOUT_SECONDS: ${CHECKPOINT_POOL_TIMEOUT_SECONDS:-10}
+  EXECUTION_MAX_RETRIES: ${EXECUTION_MAX_RETRIES:-3}
+  EXECUTION_RETRY_BASE_SECONDS: ${EXECUTION_RETRY_BASE_SECONDS:-0.05}
+  EXECUTION_RETRY_MAX_SECONDS: ${EXECUTION_RETRY_MAX_SECONDS:-0.5}
+  EXECUTION_LEASE_SECONDS: ${EXECUTION_LEASE_SECONDS:-30}
+  EXECUTION_LOCK_TIMEOUT_MS: ${EXECUTION_LOCK_TIMEOUT_MS:-2000}
+  EXECUTION_STATEMENT_TIMEOUT_MS: ${EXECUTION_STATEMENT_TIMEOUT_MS:-10000}
+  APPROVAL_TTL_SECONDS: ${APPROVAL_TTL_SECONDS:-86400}
+
 services:
   db:
     image: pgvector/pgvector:0.8.7-pg16-trixie
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-serviceflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-serviceflow_local}
-      POSTGRES_DB: ${POSTGRES_DB:-serviceflow_demo}
+    env_file:
+      - .env.phase4
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - demo_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,5 +29,62 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    environment: *backend-environment
+    env_file:
+      - .env.phase4
+    command: ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  seed:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: seed
+    environment: *backend-environment
+    env_file:
+      - .env.phase4
+    command: ["python", "-m", "scripts.seed_database"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   demo_pgdata:

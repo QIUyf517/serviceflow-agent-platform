@@ -218,12 +218,24 @@ Git：本次开始时整个 `ServiceFlow/` 为未跟踪规划包，本次未创�
 
 ## 阶段 4：前端与管理后台
 
-- [ ] React 用户聊天页：消息、业务操作确认、订单卡片、错误展示。
-- [ ] 管理后台：工单列表、详情、人工审批/接管、审计日志。
-- [ ] 开发者页：Agent轨迹、工具调用、耗时、失败定位。
-- [ ] Docker Compose 启动服务；附种子数据和演示账户说明。
+- [x] React 用户聊天页：消息、业务操作确认、订单卡片、错误展示。
+- [x] 管理后台：工单列表、详情、人工审批/接管、审计日志。
+- [x] 开发者页：Agent轨迹、工具调用、耗时、失败定位。
+- [x] Docker Compose 启动服务；附种子数据和演示账户说明。
 
 **验收：** 浏览器端完成查询 → 取消/退货 → 审计/人工接管的完整演示。
+
+### 阶段 4A 执行记录（2026-11-11）
+
+仅完成前端基础与用户聊天页；管理后台、开发者页、Compose 前端编排和阶段 4 整体验收仍未完成。React 页面接入现有真实 API，覆盖会话、身份核验、订单列表/详情、多轮对话、取消/退货确认、任务恢复和人工建单。前端自动化 **17 passed**，lint、typecheck、build 和 npm audit 通过；没有调用外部 LLM。范围、测试证据和未验证项见 `docs/PHASE4A_REPORT.md`。
+
+### 阶段 4B 执行记录（2026-11-11）
+
+在阶段 4A 既有 React 工程内完成管理后台与开发者追踪页，没有重建前端、修改后端契约或新增业务能力。管理端使用独立 `X-Operator-Token`，覆盖工单过滤分页、脱敏详情/审计、分配、合法状态流转、关闭原因、审批和人工代触发；审批不能替代客户确认。开发者页展示聊天响应和服务端任务/trace 的节点、工具、耗时、Provider、token usage 与业务关联，并对跨 session trace 安全拒绝。最终前端自动化 **7 files、30 passed、0 failed**；lint、typecheck、build 通过，外部 LLM 调用 **0**。Compose 前端编排和浏览器整体验收仍未完成，因此阶段 4 整体没有标记完成。详见 `docs/PHASE4B_REPORT.md`。
+
+### 阶段 4C 与阶段 4 收尾记录（2026-11-11）
+
+Compose 已编排 PostgreSQL、FastAPI 与 React/Nginx，三项服务均有健康检查并按健康依赖启动；普通启动不导入或复位数据，种子数据仅通过 `tools` profile 显式执行。最终后端全套 **204 passed、0 failed、0 skipped**，ruff 通过；前端 **7 files、30 passed、0 failed**，lint、typecheck、build 均通过。Playwright 使用 Chromium 连接真实 FastAPI 与真实 PostgreSQL，**6 passed、0 failed**，覆盖查询、取消、退货、未确认零写入、人工接管、审批不能替代客户确认、成功/失败 trace 与刷新恢复。随机 `phase4_e2e_*` schema 清理后残留 **0**；Docker 中 db、api、frontend 均为 healthy；外部 LLM 调用 **0**。阶段 4 的全部验收门槛已满足，详见 `docs/PHASE4_REPORT.md`。阶段 5 未开始。
 
 ## 阶段 5：评测与求职交付
 

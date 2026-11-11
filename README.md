@@ -1,6 +1,6 @@
 # ServiceFlow — 可信多 Agent 智能售后平台
 
-> 状态：阶段 3 已完成 PostgreSQL LangGraph checkpoint、规范化消息、执行租约恢复、工单/审批与人工接管。取消和退货继续复用同一可信确认及受控执行边界；修改/换货执行和阶段 4 前端尚未实现。
+> 状态：阶段 4 已完成；用户服务台、管理后台和开发者追踪页已连接真实 API，并通过真实 FastAPI、PostgreSQL 与 Chromium 的浏览器验收。阶段 5 尚未开始；修改/换货执行不在阶段 4 范围。
 
 ## 项目定位
 
@@ -22,6 +22,9 @@
 - [docs/PHASE2_4_REPORT.md](docs/PHASE2_4_REPORT.md)：阶段 2.4 Policy Agent、政策知识库与检索评估。
 - [docs/PHASE2_5A_REPORT.md](docs/PHASE2_5A_REPORT.md)：阶段 2.5A Resolution Agent、只读规则校验与验收。
 - [docs/PHASE2_5B_REPORT.md](docs/PHASE2_5B_REPORT.md)：阶段 2.5B 可信确认、订单取消执行与并发验收。
+- [docs/PHASE4A_REPORT.md](docs/PHASE4A_REPORT.md)：阶段 4A 前端基础与用户服务台验收。
+- [docs/PHASE4B_REPORT.md](docs/PHASE4B_REPORT.md)：阶段 4B 管理后台与开发者追踪页验收。
+- [docs/PHASE4_REPORT.md](docs/PHASE4_REPORT.md)：阶段 4 Compose、真实浏览器验收与总体验收。
 - [docs/DATA_AND_RAG.md](docs/DATA_AND_RAG.md)：τ-bench 下载导入、RAG、数据隔离。
 - [docs/EVALUATION.md](docs/EVALUATION.md)：基线实验、官方与扩展评测、指标。
 - [CODEX_START_HERE.md](CODEX_START_HERE.md)：第一条可以复制给 Codex 的任务提示。
@@ -510,3 +513,148 @@ $env:TEST_DATABASE_URL = 'postgresql+psycopg://serviceflow:serviceflow_local@127
 故障脚本只使用合成数据和随机 `phase3_failures_*` schema，覆盖 LLM/工具超时、并发与串行重复请求、确认后进程中断、等待确认期间订单变化，最后强制清理。2026-11-09 最终实测为 **204 passed、0 failed、0 skipped**，ruff 通过，阶段 3 和全套随机测试 schema 残留均为 0，外部 LLM 调用为 0。
 
 已知边界：阶段 3 不包含阶段 4 前端/管理后台；操作员 token 仅为本地演示；不执行修改/换货；系统不连接真实支付或通知网络；审批、checkpoint 和工单都不能替代数据库幂等、客户确认或服务端硬规则。完整证据见 [阶段 3 报告](docs/PHASE3_REPORT.md)。
+
+## 阶段 4A：用户售后聊天页
+
+阶段 4A 新增 `frontend/` React + TypeScript + Vite 工程，只包含用户服务台，不包含管理后台或开发者页。页面使用 React Router 和 TanStack Query，开发服务器将 `/api` 代理到 `http://127.0.0.1:8000`。多 Agent 聊天接口仍由后端固定使用本地 Mock Triage 和关键词政策检索，本阶段不启用外部 DeepSeek。
+
+先按前文启动 PostgreSQL 与 FastAPI，再在另一个终端启动前端：
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173/support`。页面首次访问调用 `POST /api/v1/sessions`，只把返回的随机 `session_id` 保存到浏览器 localStorage；邮箱、姓名、邮编、订单、支付信息和确认记录都不写入本地存储。刷新时先调用 `GET /api/v1/multi-agent/tasks/current`，成功后才认为身份已恢复并请求订单；返回 403 时重新显示核验门，不请求订单。
+
+主要请求/响应示例（字段沿用现有后端契约）：
+
+```http
+POST /api/v1/sessions
+
+{"session_id":"<server-session-id>"}
+
+POST /api/v1/sessions/<server-session-id>/verify
+Content-Type: application/json
+
+{"email":"<tau-bench 模拟账户邮箱>"}
+
+{"user_id":"<server-owned-user-id>"}
+
+POST /api/v1/multi-agent/chat
+X-Session-Id: <server-session-id>
+Content-Type: application/json
+
+{"message":"请取消订单 #W0000000，因为下错单了"}
+
+{
+  "task_status":"pending_confirmation",
+  "request_id":"<request-id>",
+  "pending_confirmation":{
+    "action_type":"cancel",
+    "order_id":"#W0000000",
+    "proposed_parameters":{"reason":"ordered by mistake"}
+  },
+  "execution_result":null
+}
+```
+
+确认或拒绝通过同一聊天接口发送 `{"message":"确认","request_id":"<request-id>"}` 或 `{"message":"拒绝","request_id":"<request-id>"}`。前端只有在服务端返回 `execution_result.status="succeeded"` 时显示执行成功；普通回复文本或本地按钮状态都不能推断成功。显式人工建单调用 `POST /api/v1/tickets` 并为同一次逻辑请求稳定复用 `Idempotency-Key`，成功后始终显示“等待人工处理”，不显示“已处理完成”。
+
+前端验收命令：
+
+```powershell
+cd frontend
+npm run lint
+npm run typecheck
+npm run test -- --run
+npm run build
+```
+
+本阶段自动化结果为 **17 passed**，生产构建成功，`npm audit` 为 0 个已知漏洞。自动化使用 jsdom 和网络层替身验证前端状态机及真实 URL/请求头，不把测试响应打包进运行时代码。尚未完成真实浏览器 + PostgreSQL 的人工全流程、视觉截图回归、管理/开发者页面和 Compose 前端编排；因此阶段 4 整体仍未完成。详见 [阶段 4A 报告](docs/PHASE4A_REPORT.md)。
+
+## 阶段 4B：管理后台与开发者追踪页
+
+阶段 4B 在同一个 `frontend/` 工程中增加 `/admin` 和 `/developer`，没有重建阶段 4A 工程。运行前继续按前文启动 PostgreSQL、FastAPI 和 Vite。
+
+### 管理后台
+
+浏览器打开 `http://127.0.0.1:5173/admin`。输入后端 `.env` 中的本地演示 `OPERATOR_DEMO_TOKEN`；前端只把值放在当前标签页的 `sessionStorage`，请求时发送独立 `X-Operator-Token`，不会发送或复用客户 `X-Session-Id`。该认证明确只是本地演示机制，不是生产 IAM。
+
+管理页使用以下真实接口：
+
+- `GET /api/v1/tickets`：按状态、类别、客服和时间过滤并分页。
+- `GET /api/v1/tickets/{ticket_id}` 与 `/audit`：读取脱敏详情、会话、关联 ID 和审计时间线。
+- `POST /assign` 与 `/status`：分配客服和执行后端允许的状态迁移；关闭/取消必须选择合法 `close_reason`。
+- `POST /approvals` 与 `/approvals/{approval_id}/decision`：创建、批准或拒绝内部审批。
+- `POST /execute`：代触发既有 `ExecutionService`，不能生成客户确认；缺少确认时如实显示 `confirmation_required`。
+
+审批通过不等于客户确认，人工执行成功也只以服务端 `execution_result.status="succeeded"` 为准。重复执行使用服务端执行请求原有的幂等键；页面在请求期间禁用重复点击，并如实显示 `idempotent_replay`。现有后端没有审批列表读取接口，因此页面刷新后只能从审计时间线查看审批历史，不能重新构造可操作的待审批记录。
+
+### 开发者追踪页
+
+浏览器打开 `http://127.0.0.1:5173/developer`。页面可查看同一标签页内最近一次 `/multi-agent/chat` 响应中的 `trace`、`tool_results`、`metrics` 和 `task_plan`，也可使用客户 session 边界读取：
+
+```http
+GET /api/v1/multi-agent/tasks/current
+X-Session-Id: <server-session-id>
+
+GET /api/v1/traces/<trace-id>
+X-Session-Id: <server-session-id>
+```
+
+不存在和跨 session 的 trace 都显示同一安全 404，不泄露归属。页面展示节点顺序、工具状态/错误码、节点和总耗时、任务依赖及 request/ticket/order 关联。Provider 为 `mock_local` 时明确标为 Mock，不显示为 DeepSeek；`token_usage: null` 显示为“未提供”，不推测 Token 或成本。完整 Prompt、API Key、邮箱、完整地址、支付卡数据以及 τ-bench 参考动作/评分条件都会被隐藏或脱敏。
+
+最新聊天的详细 trace 只保存在 React 页面内存中。刷新后 `tasks/current` 可恢复当前任务，`traces/{trace_id}` 可恢复持久化事件、耗时和 token usage；后者当前不返回工具结果、Provider 或模型，因此页面明确显示“当前接口未返回”，不会补造数据。
+
+阶段 4B 最终前端验收为 **7 test files、30 passed、0 failed**；lint、typecheck 和生产 build 均退出 0。仍未做真实浏览器 + PostgreSQL 人工全流程、Playwright/截图/屏幕阅读器审查和 Compose 前端编排，所以阶段 4 整体仍未完成。详见 [阶段 4B 报告](docs/PHASE4B_REPORT.md)。
+
+## 阶段 4C：Docker Compose 与浏览器演示
+
+阶段 4C 没有新增业务能力。Compose 只编排已有 PostgreSQL、FastAPI 与 React/Nginx；API 固定使用 `AGENT_PROVIDER=mock` 和关键词政策检索，不读取外部 LLM Key。API 运行镜像只包含固定版本的 `policy.md` 和产品知识，不包含 τ-bench `tasks.json`；完整只读原始数据只进入显式种子镜像。
+
+首次本地启动时，从占位符模板创建未跟踪配置，并替换两个 `<...>` 值。不要把真实密码或 token 写回 `.env.example`：
+
+```powershell
+Copy-Item .env.example .env.phase4
+# 编辑 .env.phase4：设置本地数据库密码和独立 operator token
+docker compose config
+docker compose up -d --build
+docker compose ps
+```
+
+`db` 健康后才启动 `api`，`api` 健康后才启动 `frontend`。访问入口：
+
+- `http://127.0.0.1:5173/support`：客户身份核验、订单、取消/退货、确认与人工工单。
+- `http://127.0.0.1:5173/admin`：操作员工单、审批和人工代触发。
+- `http://127.0.0.1:5173/developer`：当前任务与成功/失败 trace。
+- `http://127.0.0.1:8000/docs`：FastAPI OpenAPI。
+
+普通 `docker compose up` **不会**导入或复位数据，也不会覆盖已有 `flowagent_demo_pgdata` 卷。仅在明确需要导入固定演示快照时执行：
+
+```powershell
+docker compose --profile tools run --rm seed
+```
+
+该命令同版本重复执行不会覆盖已发生的演示业务修改。本机验收导入为 500 个模拟用户、50 个商品和 1000 个模拟订单。只有明确接受复位演示业务数据时，才把 seed 服务命令临时改为追加 `--reset`；不要对官方评测数据库使用该命令。演示库必须以 `_demo` 结尾，官方评测继续使用物理隔离的数据库/环境。
+
+本地认证边界：客户 `session_id` 只用于客户 API；操作员 token 只放内存或当前标签页 `sessionStorage`，通过 `X-Operator-Token` 发送。这是演示认证，不是生产 IAM。操作员审批不能替代客户明确确认；缺少确认时人工执行返回 `confirmation_required`。前端镜像不包含数据库密码、API Key 或 operator token。
+
+完整阶段 4 验收命令：
+
+```powershell
+$env:TEST_DATABASE_URL = 'postgresql+psycopg://serviceflow:<local-demo-database-password>@127.0.0.1:5432/serviceflow_demo'
+.venv_tau/Scripts/python -m pytest -q -rs -p no:cacheprovider --basetemp=.tmp/pytest-phase4-full
+.venv_tau/Scripts/python -m ruff check backend scripts tests
+
+Set-Location frontend
+npm run lint
+npm run typecheck
+npm run test -- --run
+npm run build
+npm run test:e2e
+Set-Location ..
+```
+
+`test:e2e` 使用 Chromium、真实 FastAPI 和真实 PostgreSQL，为每次运行创建 `phase4_e2e_<随机值>` schema，注入隔离的合成测试数据，并在成功或失败后终止测试进程、删除该 schema。最终实测：后端 **204 passed**；前端 **30 passed**；Playwright **6 passed**；ruff、lint、typecheck、build 全部通过；三个 Compose 服务均 healthy；随机 schema 残留 **0**；外部 LLM 调用 **0**。完整场景、API 映射、风险与历史失败见 [阶段 4 总报告](docs/PHASE4_REPORT.md)。
