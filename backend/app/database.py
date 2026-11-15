@@ -52,6 +52,21 @@ class OrderRow(Base):
     row_version: Mapped[int] = mapped_column(default=1)
 
 
+class OrderCreationRow(Base):
+    """Identity-bound checkout command and immutable idempotency result."""
+
+    __tablename__ = "order_creations"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String, unique=True, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.source_user_id"), index=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.source_order_id"), unique=True)
+    parameters_digest: Mapped[str] = mapped_column(String)
+    request_json: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    result_json: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    created_at: Mapped[int] = mapped_column(Integer)
+
+
 class ImportState(Base):
     __tablename__ = "import_state"
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -207,6 +222,53 @@ class ConversationRow(Base):
     pending_proposal_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class SupportThreadRow(Base):
+    """One server-owned conversation thread, optionally bound to a single order.
+
+    The thread is the isolation boundary for messages, Agent checkpoints and human
+    tickets. ``order_id`` is always derived from a server-side ownership check.
+    """
+
+    __tablename__ = "support_threads"
+    __table_args__ = (
+        CheckConstraint("kind IN ('order', 'general')", name="ck_support_threads_kind"),
+        CheckConstraint("status IN ('open', 'closed')", name="ck_support_threads_status"),
+        CheckConstraint(
+            "(kind = 'order' AND order_id IS NOT NULL) "
+            "OR (kind = 'general' AND order_id IS NULL)",
+            name="ck_support_threads_order_binding",
+        ),
+        Index(
+            "uq_support_threads_session_order",
+            "session_id",
+            "order_id",
+            unique=True,
+            postgresql_where=text("order_id IS NOT NULL"),
+            sqlite_where=text("order_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_support_threads_session_general",
+            "session_id",
+            unique=True,
+            postgresql_where=text("order_id IS NULL"),
+            sqlite_where=text("order_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.source_user_id"), nullable=True, index=True
+    )
+    order_id: Mapped[str | None] = mapped_column(
+        ForeignKey("orders.source_order_id"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)
+
+
 class TicketRow(Base):
     """Durable human-handoff ticket without customer profile fields."""
 
@@ -241,6 +303,8 @@ class TicketRow(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     ticket_no: Mapped[str] = mapped_column(String, unique=True, index=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), index=True)
+    # Server-owned thread reference; no foreign key so legacy databases can be upgraded in place.
+    thread_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.source_user_id"), nullable=True, index=True
     )
@@ -278,10 +342,13 @@ class MessageRow(Base):
         CheckConstraint("sequence > 0", name="ck_messages_sequence_positive"),
         UniqueConstraint("session_id", "sequence", name="uq_messages_session_sequence"),
         Index("ix_messages_session_created_at", "session_id", "created_at"),
+        Index("ix_messages_thread_sequence", "thread_id", "sequence"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"))
+    # Server-owned conversation thread; no foreign key so legacy databases can be upgraded.
+    thread_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     ticket_id: Mapped[str | None] = mapped_column(
         ForeignKey("tickets.id"), nullable=True, index=True
     )
@@ -340,7 +407,8 @@ class AuditEventRow(Base):
             "event_type IN ('ticket_created', 'ticket_assigned', "
             "'ticket_status_changed', 'approval_requested', 'approval_decided', "
             "'handoff_started', 'handoff_returned', 'recovery_attempted', "
-            "'recovery_succeeded', 'recovery_failed')",
+            "'recovery_succeeded', 'recovery_failed', 'operator_replied', "
+            "'customer_replied')",
             name="ck_audit_events_event_type",
         ),
         CheckConstraint(
@@ -411,9 +479,7 @@ def ensure_execution_reliability_schema(engine: Engine) -> None:
         }
         for column, ddl in additions.items():
             if column not in existing:
-                connection.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN {quote(column)} {ddl}"
-                )
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {quote(column)} {ddl}")
 
 
 def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -> dict[str, int]:
@@ -444,6 +510,7 @@ def seed(engine: Engine, db: Retail, source_hash: str, *, reset: bool = False) -
                 ChatTraceRow,
                 ConversationRow,
                 ProposalRow,
+                OrderCreationRow,
                 SessionRow,
                 OrderRow,
                 ProductRow,

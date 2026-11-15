@@ -19,8 +19,9 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<AppFrame />}>
-              <Route index element={<Navigate replace to="/support" />} />
-              <Route path="/support" element={<SupportPage />} />
+              <Route index element={<Navigate replace to="/store" />} />
+              <Route path="/store" element={<SupportPage />} />
+              <Route path="/support" element={<Navigate replace to="/store" />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/developer" element={<DeveloperPage />} />
               <Route path="*" element={<NotFoundPage />} />

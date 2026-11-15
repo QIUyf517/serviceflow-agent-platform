@@ -15,7 +15,8 @@ from app.llm import OpenAICompatibleProvider, ProviderError
 from app.multi_agent.execution import ExecutionService
 from app.multi_agent.message_store import MessageStore
 from app.multi_agent.workflow import SessionStateStore
-from app.service import Action, BusinessError, RetailService
+from app.service import Action, BusinessError, CheckoutRequest, RetailService
+from app.support_threads import SupportThreadService
 from app.ticketing import TicketService
 
 app = FastAPI(title="ServiceFlow", version="0.3.0")
@@ -23,17 +24,21 @@ app = FastAPI(title="ServiceFlow", version="0.3.0")
 phase22_store = SessionStateStore()
 
 
-def _load_multi_agent_state(service: RetailService, sid: str):
-    """Recover state by server-owned session ID; never accept a client thread ID."""
+def _load_multi_agent_state(
+    service: RetailService, sid: str, thread: dict[str, Any] | None = None
+):
+    """Recover state by server-owned session and thread; never accept a client thread ID."""
     with Session(service.engine) as db:
         session = db.get(SessionRow, sid)
         if session is None:
             raise BusinessError("session_not_found", 404)
         user_id = session.user_id
-    messages = MessageStore(service.engine).checkpoint_messages(sid)
+    thread_id = thread["thread_id"] if thread else None
+    messages = MessageStore(service.engine).checkpoint_messages(sid, thread_id=thread_id)
     state, _ = phase22_store.load(
         service.engine,
-        sid,
+        thread_id or sid,
+        session_id=sid,
         user_id=user_id,
         messages=messages,
     )
@@ -65,6 +70,19 @@ def get_ticket_service(
     service: RetailService = Depends(get_service),
 ) -> TicketService:
     return TicketService(service.engine)
+
+
+def get_thread_service(
+    service: RetailService = Depends(get_service),
+) -> SupportThreadService:
+    return SupportThreadService(service.engine)
+
+
+def _resolve_thread(
+    threads: SupportThreadService, sid: str, order_id: str | None
+) -> dict[str, Any]:
+    """Resolve the server-owned thread; the client never supplies a thread ID."""
+    return threads.resolve(sid, order_id)
 
 
 def operator_identity(
@@ -132,11 +150,48 @@ def user(
     return service.user(sid)
 
 
+@app.get("/api/v1/customer/conversation")
+def customer_conversation(
+    order_id: str | None = None,
+    sid: str = Depends(session_id),
+    service: RetailService = Depends(get_service),
+) -> list[dict[str, Any]]:
+    # The session is only a bearer handle; require its server-side identity binding.
+    with Session(service.engine) as db:
+        session = db.get(SessionRow, sid)
+        if session is None:
+            raise BusinessError("session_not_found", 404)
+        if session.user_id is None:
+            raise BusinessError("identity_required", 403)
+    thread = SupportThreadService(service.engine).resolve(sid, order_id)
+    return [
+        {
+            "sequence": row.sequence,
+            "role": row.role,
+            "content": row.content,
+            "thread_id": row.thread_id,
+            "created_at": row.created_at,
+        }
+        for row in MessageStore(service.engine).rows(sid, thread_id=thread["thread_id"])
+        if row.role in {"user", "assistant", "operator"}
+    ]
+
+
 @app.get("/api/v1/orders")
 def orders(
     sid: str = Depends(session_id), service: RetailService = Depends(get_service)
 ) -> list[dict[str, Any]]:
     return service.orders(sid)
+
+
+@app.post("/api/v1/orders")
+def checkout(
+    request: CheckoutRequest,
+    sid: str = Depends(session_id),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RetailService = Depends(get_service),
+) -> dict[str, Any]:
+    return service.checkout(sid, request, idempotency_key=idempotency_key)
 
 
 @app.get("/api/v1/orders/{oid}")
@@ -146,11 +201,18 @@ def order(
     return service.order(sid, oid)
 
 
+@app.get("/api/v1/products")
+def products(
+    sid: str = Depends(session_id), service: RetailService = Depends(get_service)
+) -> list[dict[str, Any]]:
+    return service.products(sid)
+
+
 @app.get("/api/v1/products/{pid}")
 def product(
     pid: str, sid: str = Depends(session_id), service: RetailService = Depends(get_service)
 ) -> dict[str, Any]:
-    return service.product(sid, pid)
+    return service.product(sid, pid, public=True)
 
 
 @app.post("/api/v1/operations", deprecated=True)
@@ -200,6 +262,13 @@ class MultiAgentConversationRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=2000)
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    order_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class SupportThreadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    order_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class TicketCreateRequest(BaseModel):
@@ -208,19 +277,23 @@ class TicketCreateRequest(BaseModel):
     category: Literal["customer_requested_human"] = "customer_requested_human"
     severity: str = Field(default="medium", min_length=1, max_length=32)
     priority: int = Field(default=3, ge=1, le=5)
-    reason_code: str = Field(
-        default="customer_requested_human", min_length=1, max_length=128
-    )
+    reason_code: str = Field(default="customer_requested_human", min_length=1, max_length=128)
     summary: str = Field(min_length=1, max_length=1_000)
     requested_action: dict[str, Any] = Field(default_factory=dict)
     order_id: str | None = Field(default=None, min_length=1, max_length=128)
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class TicketAssignRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     assignee: str = Field(min_length=1, max_length=128)
+
+
+class TicketReplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    content: str = Field(min_length=1, max_length=2_000)
 
 
 class TicketStatusRequest(BaseModel):
@@ -235,14 +308,17 @@ class TicketStatusRequest(BaseModel):
         "closed",
         "cancelled",
     ]
-    close_reason: Literal[
-        "resolved_by_agent",
-        "resolved_by_operator",
-        "customer_unresponsive",
-        "duplicate",
-        "rejected",
-        "out_of_scope",
-    ] | None = None
+    close_reason: (
+        Literal[
+            "resolved_by_agent",
+            "resolved_by_operator",
+            "customer_unresponsive",
+            "duplicate",
+            "rejected",
+            "out_of_scope",
+        ]
+        | None
+    ) = None
 
 
 class ApprovalRequest(BaseModel):
@@ -259,6 +335,16 @@ class ApprovalDecisionRequest(BaseModel):
 
     decision: Literal["approved", "rejected"]
     reason: str = Field(min_length=1, max_length=1_000)
+
+
+@app.post("/api/v1/support/threads")
+def open_support_thread(
+    request: SupportThreadRequest,
+    sid: str = Depends(session_id),
+    threads: SupportThreadService = Depends(get_thread_service),
+) -> dict[str, Any]:
+    """Create or restore one order's conversation thread after an ownership check."""
+    return _resolve_thread(threads, sid, request.order_id)
 
 
 @app.post("/api/v1/tickets")
@@ -281,6 +367,7 @@ def create_ticket(
         actor="user",
         order_id=request.order_id,
         request_id=request.request_id,
+        thread_id=request.thread_id,
         agent_state={"source": "explicit_customer_request"},
         customer_explicit=True,
     )
@@ -311,6 +398,34 @@ def list_tickets(
     )
 
 
+@app.get("/api/v1/customer/tickets")
+def customer_tickets(
+    sid: str = Depends(session_id), tickets: TicketService = Depends(get_ticket_service)
+) -> list[dict[str, Any]]:
+    return tickets.customer_tickets(sid)
+
+
+@app.get("/api/v1/customer/tickets/{ticket_id}/updates")
+def customer_ticket_updates(
+    ticket_id: str,
+    sid: str = Depends(session_id),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.customer_updates(sid, ticket_id)
+
+
+@app.post("/api/v1/customer/tickets/{ticket_id}/messages")
+def customer_ticket_reply(
+    ticket_id: str,
+    request: TicketReplyRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    sid: str = Depends(session_id),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    """Send a customer message to the bound human ticket without invoking an Agent."""
+    return tickets.customer_reply(sid, ticket_id, request.content, idempotency_key)
+
+
 @app.get("/api/v1/tickets/{ticket_id}")
 def ticket_detail(
     ticket_id: str,
@@ -328,6 +443,16 @@ def assign_ticket(
     tickets: TicketService = Depends(get_ticket_service),
 ) -> dict[str, Any]:
     return tickets.assign(ticket_id, request.assignee, operator_id)
+
+
+@app.post("/api/v1/tickets/{ticket_id}/reply")
+def reply_ticket(
+    ticket_id: str,
+    request: TicketReplyRequest,
+    operator_id: str = Depends(operator_identity),
+    tickets: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    return tickets.reply(ticket_id, request.content, operator_id)
 
 
 @app.post("/api/v1/tickets/{ticket_id}/status")
@@ -437,6 +562,7 @@ def debug_plan(
         triage,
         phase22_store,
         policy_agent=policy_agent,
+        thread_id=SupportThreadService(service.engine).resolve(sid, None)["thread_id"],
     )
 
 
@@ -446,6 +572,7 @@ def multi_agent_chat(
     sid: str = Depends(session_id),
     service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     """Natural-language cancel/return flow; confirmation parsing is deterministic."""
     from app.multi_agent.conversation import run_after_sales_conversation
@@ -459,6 +586,7 @@ def multi_agent_chat(
         policy_embedding_api_key=None,
     )
     policy_agent = build_policy_agent(service.engine, local_settings)
+    thread = _resolve_thread(threads, sid, request.order_id)
     return run_after_sales_conversation(
         service,
         execution,
@@ -467,6 +595,7 @@ def multi_agent_chat(
         phase22_store,
         policy_agent,
         request_id=request.request_id,
+        thread=thread,
     )
 
 
@@ -499,13 +628,16 @@ def controlled_single_agent_chat(
 
 @app.get("/api/v1/multi-agent/tasks/current")
 def current_multi_agent_task(
+    order_id: str | None = None,
     sid: str = Depends(session_id),
     service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     from app.multi_agent.conversation import current_task_progress
 
-    return current_task_progress(service, execution, sid, phase22_store)
+    thread = _resolve_thread(threads, sid, order_id)
+    return current_task_progress(service, execution, sid, phase22_store, thread=thread)
 
 
 @app.post("/api/v1/multi-agent/cancel-requests")
@@ -514,17 +646,16 @@ def create_cancel_request(
     sid: str = Depends(session_id),
     service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     """Materialize the current eligible Resolution proposal; do not change the order."""
     with phase22_store.lock:
-        state = _load_multi_agent_state(service, sid)
+        state = _load_multi_agent_state(
+            service, sid, _resolve_thread(threads, sid, None)
+        )
         proposal = state["resolution_proposal"]
         eligibility = state["eligibility_result"]
-        if (
-            proposal is None
-            or eligibility is None
-            or proposal.proposal_id != request.proposal_id
-        ):
+        if proposal is None or eligibility is None or proposal.proposal_id != request.proposal_id:
             raise BusinessError("resolution_proposal_not_found", 404)
         proposal = proposal.model_copy(deep=True)
         eligibility = eligibility.model_copy(deep=True)
@@ -562,12 +693,20 @@ def execute_cancel_request(
     request_id: str,
     idempotency_key: str = Header(alias="Idempotency-Key"),
     sid: str = Depends(session_id),
+    service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     from app.multi_agent.workflow import run_execution_turn
 
+    thread = _resolve_thread(threads, sid, None)
     return run_execution_turn(
-        execution, sid, request_id, idempotency_key, phase22_store
+        execution,
+        sid,
+        request_id,
+        idempotency_key,
+        phase22_store,
+        thread_id=thread["thread_id"],
     )
 
 
@@ -586,10 +725,13 @@ def create_return_request(
     sid: str = Depends(session_id),
     service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     """Materialize the current eligible return proposal without changing the order."""
     with phase22_store.lock:
-        state = _load_multi_agent_state(service, sid)
+        state = _load_multi_agent_state(
+            service, sid, _resolve_thread(threads, sid, None)
+        )
         proposal = state["resolution_proposal"]
         eligibility = state["eligibility_result"]
         if (
@@ -641,15 +783,23 @@ def execute_return_request(
     request_id: str,
     idempotency_key: str = Header(alias="Idempotency-Key"),
     sid: str = Depends(session_id),
+    service: RetailService = Depends(get_service),
     execution: ExecutionService = Depends(get_execution_service),
+    threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     from app.multi_agent.workflow import run_execution_turn
 
     request = execution.get_request(sid, request_id)
     if request.action_type != "return":
         raise BusinessError("execution_action_mismatch", 409)
+    thread = _resolve_thread(threads, sid, None)
     return run_execution_turn(
-        execution, sid, request_id, idempotency_key, phase22_store
+        execution,
+        sid,
+        request_id,
+        idempotency_key,
+        phase22_store,
+        thread_id=thread["thread_id"],
     )
 
 

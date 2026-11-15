@@ -1,16 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError } from '../api/errors'
 import { newIdempotencyKey } from '../api/idempotency'
-import { clearSessionId, readSessionId, saveSessionId } from '../api/sessionStore'
+import {
+  clearSessionId,
+  clearSupportContext,
+  readSessionId,
+  readSupportContext,
+  saveSessionId,
+  saveSupportContext,
+} from '../api/sessionStore'
 import { serviceflowApi } from '../api/serviceflow'
 import type {
+  CheckoutResult,
   ConversationResponse,
   ExecutionResult,
   IdentityInput,
   PendingConfirmation,
+  Product,
+  ProductVariant,
   ResolutionProposal,
+  SupportThread,
   TaskPlanItem,
   TaskProgress,
   Ticket,
@@ -19,10 +30,14 @@ import { ConfirmationPanel } from '../components/ConfirmationPanel'
 import { ConversationPanel, type ChatMessage } from '../components/ConversationPanel'
 import { IdentityGate } from '../components/IdentityGate'
 import { OrdersPanel } from '../components/OrdersPanel'
+import { ProductCatalog } from '../components/ProductCatalog'
 import { StateNotice } from '../components/StateNotice'
+import { StoreCart, type CartLine } from '../components/StoreCart'
+import { SupportDialog } from '../components/SupportDialog'
 import { TaskProgress as TaskProgressPanel } from '../components/TaskProgress'
 import { TicketPanel } from '../components/TicketPanel'
 import { useTraceWorkspace } from '../app/TraceWorkspaceContext'
+import { productName } from '../utils/productLocale'
 
 type PagePhase = 'booting' | 'verification' | 'verified' | 'error'
 
@@ -70,7 +85,9 @@ function fromProgress(progress: TaskProgress): ViewState {
     resolutionProposal: progress.resolution_proposal,
     failureReason: null,
     ticket: null,
-    finalResponse: progress.final_response,
+    finalResponse: /Routing limit reached|Read-only query completed|Please provide:|Cancellation rejected|Action is pending confirmation/.test(progress.final_response)
+      ? '已恢复上一轮处理状态，请继续描述你的需求。'
+      : progress.final_response,
   }
 }
 
@@ -85,6 +102,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   database_unavailable: '业务数据库暂时不可用，请稍后重试。',
   confirmation_expired: '确认已过期，操作没有执行。请重新发起方案。',
   order_changed: '订单状态已经变化，旧方案没有执行。请重新查询。',
+  variant_unavailable: '所选商品规格已经不可购买，请移除后重新选择。',
+  payment_method_invalid: '支付方式不可用，请选择当前账户中的支付方式。',
+  gift_card_insufficient: '礼品卡余额不足，本次订单没有创建。',
+  idempotency_key_conflict: '结算内容已经变化，请重新提交订单。',
+  checkout_quantity_invalid: '单个规格最多购买 10 件，整笔订单最多 20 件。',
+  ticket_message_idempotency_conflict: '这条人工消息的重试内容不一致，请重新发送。',
+  ticket_message_idempotency_key_invalid: '人工消息请求标识无效，请重新发送。',
+  ticket_terminal: '人工工单已经结束，请重新发起咨询。',
 }
 
 function errorMessage(error: unknown): string {
@@ -106,12 +131,95 @@ export function SupportPage() {
   const [retryVersion, setRetryVersion] = useState(0)
   const [recovered, setRecovered] = useState(false)
   const [view, setView] = useState<ViewState>(EMPTY_VIEW)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([])
   const [chatError, setChatError] = useState<string>()
+  const [selectedProduct, setSelectedProduct] = useState<Awaited<ReturnType<typeof serviceflowApi.getProduct>> | null>(null)
+  const [productDialogOpen, setProductDialogOpen] = useState(false)
+  const [productDetailError, setProductDetailError] = useState<string>()
   const [selectedOrder, setSelectedOrder] = useState<Awaited<ReturnType<typeof serviceflowApi.getOrder>> | null>(null)
   const [detailError, setDetailError] = useState<string>()
+  const [cartLines, setCartLines] = useState<CartLine[]>([])
+  const [checkoutError, setCheckoutError] = useState<string>()
+  const [checkoutResult, setCheckoutResult] = useState<CheckoutResult | null>(null)
+  const [supportDialogOpen, setSupportDialogOpen] = useState(false)
+  const [supportOrderId, setSupportOrderId] = useState<string | null>(null)
+  const [supportThread, setSupportThread] = useState<SupportThread | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
   const sendInFlight = useRef(false)
   const ticketKey = useRef(newIdempotencyKey('ticket'))
+  const checkoutKey = useRef(newIdempotencyKey('checkout'))
+
+  const customerTicketsQuery = useQuery({
+    queryKey: ['customer-tickets', sessionId],
+    queryFn: serviceflowApi.customerTickets,
+    enabled: phase === 'verified' && supportDialogOpen,
+    refetchInterval: supportDialogOpen ? 5_000 : false,
+  })
+  const threadTickets = supportThread
+    ? customerTicketsQuery.data?.filter((ticket) => ticket.thread_id === supportThread.thread_id)
+    : undefined
+  const serverActiveTicket = threadTickets?.find(
+    (ticket) => ticket.status !== 'closed' && ticket.status !== 'cancelled',
+  )
+  const chatTicket = view.ticket && view.ticket.thread_id === supportThread?.thread_id
+    ? view.ticket
+    : null
+  const activeTicket = serverActiveTicket ?? (chatTicket
+    ? {
+        id: chatTicket.id,
+        ticket_no: chatTicket.ticket_no,
+        status: chatTicket.status,
+        order_id: chatTicket.order_id ?? null,
+        thread_id: chatTicket.thread_id ?? supportThread?.thread_id ?? null,
+      }
+    : null)
+  const activeTicketId = activeTicket?.id
+  const humanHandoffActive = Boolean(
+    activeTicket
+      && activeTicket.status !== 'closed'
+      && activeTicket.status !== 'cancelled',
+  )
+  const threadConversationQuery = useQuery({
+    queryKey: ['thread-conversation', sessionId, supportOrderId, supportThread?.thread_id],
+    queryFn: () => serviceflowApi.customerConversation(supportOrderId),
+    enabled: phase === 'verified' && supportDialogOpen && Boolean(supportThread),
+    refetchInterval: supportDialogOpen ? 5_000 : false,
+    retry: false,
+  })
+  // The thread history is the only message source across orders; local messages
+  // only bridge the first turn before the server list contains it.
+  const threadMessages: ChatMessage[] = threadConversationQuery.data?.length
+    ? threadConversationQuery.data.map((item) => ({
+        id: `thread-${item.sequence}`,
+        role: item.role,
+        text: item.content,
+      }))
+    : localMessages
+  const supportRequestSeq = useRef(0)
+
+  async function bindSupportThread(orderId: string | null) {
+    const seq = ++supportRequestSeq.current
+    setSupportOrderId(orderId)
+    setSupportDialogOpen(true)
+    setSupportThread(null)
+    setLocalMessages([])
+    setChatError(undefined)
+    // Confirmation state belongs to one thread and must never follow the customer
+    // to another order.
+    setView(EMPTY_VIEW)
+    setRecovered(false)
+    try {
+      const thread = await serviceflowApi.openSupportThread(orderId)
+      if (seq !== supportRequestSeq.current) return
+      setSupportThread(thread)
+      const progress = await serviceflowApi.currentTask(orderId).catch(() => null)
+      if (seq !== supportRequestSeq.current || !progress) return
+      setView(fromProgress(progress))
+      setRecovered(true)
+    } catch (error) {
+      if (seq === supportRequestSeq.current) setChatError(errorMessage(error))
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -148,17 +256,18 @@ export function SupportPage() {
         const restored = fromProgress(progress)
         setView(restored)
         setRecovered(true)
-        if (restored.finalResponse) {
-          setMessages([
-            {
-              id: messageId(),
-              role: 'assistant',
-              text: restored.finalResponse,
-              recovered: true,
-            },
-          ])
-        }
         setPhase('verified')
+        if (restored.pendingConfirmation) {
+          const restoredOrder = progress.thread_kind === 'order'
+            ? progress.thread_order_id ?? restored.pendingConfirmation.order_id
+            : null
+          void bindSupportThread(restoredOrder)
+        } else {
+          const savedContext = readSupportContext()
+          if (savedContext !== null) {
+            void bindSupportThread(savedContext === 'general' ? null : savedContext)
+          }
+        }
       } catch (error) {
         if (cancelled) return
         if (error instanceof ApiError && error.code === 'session_not_found') {
@@ -174,12 +283,18 @@ export function SupportPage() {
           }
           return
         }
-        if (
-          error instanceof ApiError &&
-          (error.code === 'identity_required' || error.code === 'task_state_not_found')
-        ) {
-          setVerificationNotice(errorMessage(error))
+        if (error instanceof ApiError && error.code === 'identity_required') {
+          setVerificationNotice(undefined)
           setPhase('verification')
+          return
+        }
+        if (error instanceof ApiError && error.code === 'task_state_not_found') {
+          setVerificationNotice(undefined)
+          setPhase('verified')
+          const savedContext = readSupportContext()
+          if (savedContext !== null) {
+            void bindSupportThread(savedContext === 'general' ? null : savedContext)
+          }
           return
         }
         setBootError(errorMessage(error))
@@ -193,9 +308,21 @@ export function SupportPage() {
     }
   }, [retryVersion])
 
+  const productsQuery = useQuery({
+    queryKey: ['products', sessionId],
+    queryFn: serviceflowApi.listProducts,
+    enabled: Boolean(sessionId) && phase !== 'booting' && phase !== 'error',
+  })
+
   const ordersQuery = useQuery({
     queryKey: ['orders', sessionId],
     queryFn: serviceflowApi.listOrders,
+    enabled: phase === 'verified' && Boolean(sessionId),
+  })
+
+  const userQuery = useQuery({
+    queryKey: ['current-user', sessionId],
+    queryFn: serviceflowApi.currentUser,
     enabled: phase === 'verified' && Boolean(sessionId),
   })
 
@@ -209,6 +336,11 @@ export function SupportPage() {
       setPhase('verified')
       setRecovered(false)
       void queryClient.invalidateQueries({ queryKey: ['orders', sessionId] })
+      void queryClient.invalidateQueries({ queryKey: ['current-user', sessionId] })
+      const savedContext = readSupportContext()
+      if (savedContext !== null) {
+        void bindSupportThread(savedContext === 'general' ? null : savedContext)
+      }
     },
   })
 
@@ -222,19 +354,90 @@ export function SupportPage() {
     onError: (error) => setDetailError(errorMessage(error)),
   })
 
+  const productDetailMutation = useMutation({
+    mutationFn: serviceflowApi.getProduct,
+    onMutate: () => {
+      setProductDetailError(undefined)
+      setSelectedProduct(null)
+    },
+    onSuccess: setSelectedProduct,
+    onError: (error) => setProductDetailError(errorMessage(error)),
+  })
+
+  const switchCustomerMutation = useMutation({
+    mutationFn: serviceflowApi.createSession,
+    onSuccess: (created) => {
+      clearSessionId()
+      saveSessionId(created.session_id)
+      setSessionId(created.session_id)
+      setPhase('verification')
+      setVerificationNotice('已建立新的模拟顾客会话，请重新核验身份。')
+      setRecovered(false)
+      setView(EMPTY_VIEW)
+      setLocalMessages([])
+      setChatError(undefined)
+      setSelectedOrder(null)
+      setDetailError(undefined)
+      setSelectedProduct(null)
+      setProductDialogOpen(false)
+      setProductDetailError(undefined)
+      setCartLines([])
+      setCheckoutError(undefined)
+      setCheckoutResult(null)
+      setSupportDialogOpen(false)
+      setSupportOrderId(null)
+      setSupportThread(null)
+      clearSupportContext()
+      ticketKey.current = newIdempotencyKey('ticket')
+      checkoutKey.current = newIdempotencyKey('checkout')
+      sendInFlight.current = false
+      traceWorkspace.clear()
+      queryClient.removeQueries({ queryKey: ['orders'] })
+      queryClient.removeQueries({ queryKey: ['current-user'] })
+    },
+  })
+
+  const checkoutMutation = useMutation({
+    mutationFn: (paymentMethodId: string) =>
+      serviceflowApi.checkout(
+        {
+          items: cartLines.map((line) => ({
+            item_id: line.variant.item_id,
+            quantity: line.quantity,
+          })),
+          payment_method_id: paymentMethodId,
+        },
+        checkoutKey.current,
+      ),
+    onMutate: () => {
+      setCheckoutError(undefined)
+      setCheckoutResult(null)
+    },
+    onSuccess: (result) => {
+      setCheckoutResult(result)
+      setCartLines([])
+      setSelectedOrder(result.order)
+      checkoutKey.current = newIdempotencyKey('checkout')
+      void queryClient.invalidateQueries({ queryKey: ['orders', sessionId] })
+      void queryClient.invalidateQueries({ queryKey: ['current-user', sessionId] })
+    },
+    onError: (error) => setCheckoutError(errorMessage(error)),
+  })
+
   const chatMutation = useMutation({
     mutationFn: ({ message, requestId }: { message: string; requestId?: string }) =>
-      serviceflowApi.chat(message, requestId),
+      serviceflowApi.chat(message, requestId, supportOrderId),
     onMutate: ({ message }) => {
       setChatError(undefined)
-      setMessages((current) => [...current, { id: messageId(), role: 'user', text: message }])
+      setLocalMessages((current) => [...current, { id: messageId(), role: 'user', text: message }])
     },
     onSuccess: (response) => {
       traceWorkspace.record(response)
       const next = fromConversation(response)
       setView(next)
+      if (next.ticket) void queryClient.invalidateQueries({ queryKey: ['customer-tickets', sessionId] })
       if (next.finalResponse) {
-        setMessages((current) => [
+        setLocalMessages((current) => [
           ...current,
           { id: messageId(), role: 'assistant', text: next.finalResponse },
         ])
@@ -245,6 +448,31 @@ export function SupportPage() {
           detailMutation.mutate(next.executionResult.order_id)
         }
       }
+      void queryClient.invalidateQueries({
+        queryKey: ['thread-conversation', sessionId, supportOrderId],
+      })
+    },
+    onError: (error) => setChatError(errorMessage(error)),
+    onSettled: () => {
+      sendInFlight.current = false
+    },
+  })
+
+  const ticketMessageMutation = useMutation({
+    mutationFn: ({ ticketId, message, idempotencyKey }: { ticketId: string; message: string; idempotencyKey: string }) =>
+      serviceflowApi.replyToTicket(ticketId, message, idempotencyKey),
+    onMutate: ({ message }) => {
+      setChatError(undefined)
+      setLocalMessages((current) => [...current, { id: messageId(), role: 'user', text: message }])
+    },
+    onSuccess: (response) => {
+      setView((current) => current.ticket
+        ? { ...current, ticket: { ...current.ticket, status: response.status } }
+        : current)
+      void queryClient.invalidateQueries({ queryKey: ['customer-tickets', sessionId] })
+      void queryClient.invalidateQueries({
+        queryKey: ['thread-conversation', sessionId, supportOrderId],
+      })
     },
     onError: (error) => setChatError(errorMessage(error)),
     onSettled: () => {
@@ -260,22 +488,108 @@ export function SupportPage() {
           severity: 'medium',
           priority: 3,
           reason_code: 'customer_requested_human',
-          summary: 'Customer requested human support from the ServiceFlow user page.',
+          summary: supportOrderId
+            ? `顾客就订单 ${supportOrderId} 请求人工客服。`
+            : '顾客在通用咨询中请求人工客服。',
           requested_action: {
             action: view.pendingConfirmation?.action_type ?? 'human_review',
             source: 'web_user_page',
           },
-          ...(selectedOrder ? { order_id: selectedOrder.order_id } : {}),
+          ...(supportOrderId ? { order_id: supportOrderId } : {}),
           ...(view.pendingConfirmation ? { request_id: view.pendingConfirmation.request_id } : {}),
+          ...(supportThread ? { thread_id: supportThread.thread_id } : {}),
         },
         ticketKey.current,
       ),
-    onSuccess: (ticket) => setView((current) => ({ ...current, ticket })),
+    onSuccess: (ticket) => {
+      setView((current) => ({ ...current, ticket }))
+      void queryClient.invalidateQueries({ queryKey: ['customer-tickets', sessionId] })
+    },
   })
+
+  function resetCheckoutState() {
+    checkoutKey.current = newIdempotencyKey('checkout')
+    setCheckoutError(undefined)
+    setCheckoutResult(null)
+  }
+
+  function addToCart(product: Product, variant: ProductVariant) {
+    resetCheckoutState()
+    setCartLines((current) => {
+      const existing = current.find((line) => line.variant.item_id === variant.item_id)
+      if (existing) {
+        return current.map((line) =>
+          line.variant.item_id === variant.item_id
+            ? { ...line, quantity: Math.min(10, line.quantity + 1) }
+            : line,
+        )
+      }
+      return [
+        ...current,
+        {
+          productId: product.product_id,
+          productName: product.name,
+          variant,
+          quantity: 1,
+        },
+      ]
+    })
+  }
+
+  function changeCartQuantity(itemId: string, quantity: number) {
+    resetCheckoutState()
+    setCartLines((current) =>
+      current.map((line) => line.variant.item_id === itemId ? { ...line, quantity } : line),
+    )
+  }
+
+  function removeCartLine(itemId: string) {
+    resetCheckoutState()
+    setCartLines((current) => current.filter((line) => line.variant.item_id !== itemId))
+  }
+
+  function openSupport(orderId: string) {
+    setSupportOrderId(orderId)
+    setSupportDialogOpen(true)
+    saveSupportContext(orderId)
+    if (selectedOrder?.order_id !== orderId) detailMutation.mutate(orderId)
+    void bindSupportThread(orderId)
+  }
+
+  function openGeneralSupport() {
+    setSupportOrderId(null)
+    setSupportDialogOpen(true)
+    saveSupportContext(null)
+    void bindSupportThread(null)
+  }
+
+  const closeSupport = useCallback(() => {
+    setSupportDialogOpen(false)
+    setSupportThread(null)
+    clearSupportContext()
+  }, [])
+  const closeProduct = useCallback(() => {
+    setProductDialogOpen(false)
+    setSelectedProduct(null)
+    setProductDetailError(undefined)
+  }, [])
+
+  function openProduct(productId: string) {
+    setProductDialogOpen(true)
+    productDetailMutation.mutate(productId)
+  }
 
   function sendMessage(message: string, requestId = view.pendingConfirmation?.request_id) {
     if (sendInFlight.current) return
     sendInFlight.current = true
+    if (!requestId && humanHandoffActive && activeTicketId) {
+      ticketMessageMutation.mutate({
+        ticketId: activeTicketId,
+        message,
+        idempotencyKey: newIdempotencyKey('customer-message'),
+      })
+      return
+    }
     chatMutation.mutate({ message, ...(requestId ? { requestId } : {}) })
   }
 
@@ -284,6 +598,14 @@ export function SupportPage() {
     if (!request || request.status !== 'pending_confirmation') return
     sendMessage(decision === 'confirm' ? '确认' : '拒绝', request.request_id)
   }
+
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase('zh-CN')
+  const visibleProducts = productsQuery.data?.filter((product) => {
+    if (!normalizedSearch) return true
+    return productName(product.name, product.product_id)
+      .toLocaleLowerCase('zh-CN')
+      .includes(normalizedSearch)
+  })
 
   if (phase === 'booting') {
     return (
@@ -313,27 +635,104 @@ export function SupportPage() {
     )
   }
 
-  if (phase === 'verification') {
-    return (
-      <IdentityGate
-        isPending={verifyMutation.isPending}
-        errorMessage={verifyMutation.error ? errorMessage(verifyMutation.error) : verificationNotice}
-        onVerify={(identity) => verifyMutation.mutate(identity)}
-      />
-    )
-  }
-
   return (
-    <div className="support-page">
-      <header className="support-intro">
+    <div className="store-page">
+      <div className="store-utility">
+        <span>欢迎来到 ServiceFlow 模拟商城</span>
+        <nav aria-label="商城快捷导航">
+          <a href="#catalog">商品分类</a>
+          <a href="#cart">购物车（{cartLines.reduce((sum, line) => sum + line.quantity, 0)}）</a>
+          <a href="#customer-service">我的订单</a>
+        </nav>
+      </div>
+
+      <header className="commerce-header">
         <div>
-          <p className="status-kicker">可信售后协作</p>
-          <h1>先看清，再确认。</h1>
+          <p>ServiceFlow</p>
+          <strong>安心选 · 放心问</strong>
         </div>
-        <p>订单事实来自业务数据库；取消和退货只有在服务端返回执行结果后才算成功。</p>
+        <label className="store-search">
+          <span className="sr-only">搜索商品</span>
+          <input
+            type="search"
+            value={searchQuery}
+            placeholder="搜索中文商品名"
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          <b>搜索</b>
+        </label>
+        <a className="header-cart" href="#cart">购物车 <strong>{cartLines.length}</strong></a>
       </header>
-      <div className="support-grid">
-        <div className="support-main">
+
+      <nav className="category-strip" aria-label="商品分类">
+        <strong>全部商品</strong>
+        <span>数码家电</span>
+        <span>居家生活</span>
+        <span>运动户外</span>
+        <span>服饰个护</span>
+      </nav>
+
+      <div className="store-shop-layout">
+        <ProductCatalog
+          products={visibleProducts}
+          selectedProduct={selectedProduct}
+          isDetailOpen={productDialogOpen}
+          isLoading={productsQuery.isLoading}
+          isDetailLoading={productDetailMutation.isPending}
+          errorMessage={productsQuery.error ? errorMessage(productsQuery.error) : undefined}
+          detailErrorMessage={productDetailError}
+          onSelect={openProduct}
+          onAddToCart={addToCart}
+          onCloseDetail={closeProduct}
+        />
+        <StoreCart
+          lines={cartLines}
+          verified={phase === 'verified'}
+          profile={userQuery.data}
+          isProfileLoading={userQuery.isLoading}
+          isCheckingOut={checkoutMutation.isPending}
+          checkoutError={checkoutError}
+          checkoutResult={checkoutResult}
+          onQuantityChange={changeCartQuantity}
+          onRemove={removeCartLine}
+          onCheckout={(paymentMethodId) => checkoutMutation.mutate(paymentMethodId)}
+        />
+      </div>
+
+      <section className="store-service" id="customer-service" aria-labelledby="service-title">
+        <header className="service-heading">
+          <div>
+            <h2 id="service-title">我的订单</h2>
+          </div>
+          <div className="customer-session-state">
+            <button className="text-button" type="button" onClick={openGeneralSupport}>
+              通用咨询
+            </button>
+            {phase === 'verified' ? (
+              <>
+                <span>身份已核验</span>
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={switchCustomerMutation.isPending}
+                  onClick={() => switchCustomerMutation.mutate()}
+                >
+                  {switchCustomerMutation.isPending ? '正在切换…' : '切换模拟顾客'}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </header>
+
+        {phase === 'verification' ? (
+          <IdentityGate
+            isPending={verifyMutation.isPending}
+            errorMessage={verifyMutation.error ? errorMessage(verifyMutation.error) : verificationNotice}
+            onVerify={(identity) => verifyMutation.mutate(identity)}
+          />
+        ) : null}
+
+        {phase === 'verified' ? (
           <OrdersPanel
             orders={ordersQuery.data}
             selectedOrder={selectedOrder}
@@ -342,31 +741,39 @@ export function SupportPage() {
             errorMessage={ordersQuery.error ? errorMessage(ordersQuery.error) : undefined}
             detailErrorMessage={detailError}
             onSelect={(orderId) => detailMutation.mutate(orderId)}
+            onContactSupport={openSupport}
           />
-          <ConversationPanel
-            messages={messages}
-            isPending={chatMutation.isPending}
-            errorMessage={chatError}
-            onSend={sendMessage}
-          />
-          <ConfirmationPanel
-            request={view.pendingConfirmation}
-            result={view.executionResult}
-            isPending={chatMutation.isPending}
-            failureReason={view.failureReason}
-            onDecision={decide}
-          />
+        ) : null}
+      </section>
+
+      <SupportDialog open={supportDialogOpen && (phase === 'verified' || supportOrderId === null)} orderId={supportOrderId} onClose={closeSupport}>
+        <div className="support-dialog-grid">
+          <div>
+              <ConversationPanel
+                messages={threadMessages}
+                isPending={chatMutation.isPending || ticketMessageMutation.isPending}
+                errorMessage={chatError}
+                onSend={sendMessage}
+              />
+              <ConfirmationPanel
+                request={view.pendingConfirmation}
+                result={view.executionResult}
+                isPending={chatMutation.isPending || ticketMessageMutation.isPending}
+                failureReason={view.failureReason}
+                onDecision={decide}
+              />
+          </div>
+          <aside>
+              <TaskProgressPanel status={view.taskStatus} plan={view.taskPlan} recovered={recovered} />
+              <TicketPanel
+                ticket={activeTicket ? { id: activeTicket.id, ticket_no: activeTicket.ticket_no, status: activeTicket.status } : null}
+                isPending={ticketMutation.isPending}
+                errorMessage={ticketMutation.error ? errorMessage(ticketMutation.error) : undefined}
+                onCreate={() => ticketMutation.mutate()}
+              />
+          </aside>
         </div>
-        <div className="support-side">
-          <TaskProgressPanel status={view.taskStatus} plan={view.taskPlan} recovered={recovered} />
-          <TicketPanel
-            ticket={view.ticket}
-            isPending={ticketMutation.isPending}
-            errorMessage={ticketMutation.error ? errorMessage(ticketMutation.error) : undefined}
-            onCreate={() => ticketMutation.mutate()}
-          />
-        </div>
-      </div>
+      </SupportDialog>
     </div>
   )
 }

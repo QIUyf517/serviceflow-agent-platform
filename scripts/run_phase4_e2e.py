@@ -90,6 +90,34 @@ def _source() -> dict[str, Any]:
                 else []
             ),
         }
+    # One customer owns two orders so the browser can prove thread isolation.
+    thread_user = "phase4-thread-user"
+    users[thread_user] = {
+        "user_id": thread_user,
+        "name": {"first_name": "Phase", "last_name": "Thread"},
+        "email": "thread.phase4@example.invalid",
+        "address": address,
+        "payment_methods": {},
+        "orders": ["e2e-thread-a", "e2e-thread-b"],
+    }
+    for order_id in ("e2e-thread-a", "e2e-thread-b"):
+        orders[order_id] = {
+            "order_id": order_id,
+            "user_id": thread_user,
+            "status": "pending",
+            "address": address,
+            "items": [
+                {
+                    "item_id": "e2e-item",
+                    "product_id": "e2e-product",
+                    "name": "Phase 4 Test Product",
+                    "options": {"color": "test"},
+                    "price": 10.0,
+                }
+            ],
+            "fulfillments": [],
+            "payment_history": [],
+        }
     return {
         "users": users,
         "products": {

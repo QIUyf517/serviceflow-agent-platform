@@ -59,6 +59,7 @@ class MessageStore:
         meta: dict[str, Any] | None = None,
         trace_id: str | None = None,
         ticket_id: str | None = None,
+        thread_id: str | None = None,
     ) -> int:
         if not content.strip():
             raise ValueError("message_content_required")
@@ -80,6 +81,7 @@ class MessageStore:
                 MessageRow(
                     id=uuid4().hex,
                     session_id=session_id,
+                    thread_id=thread_id,
                     ticket_id=ticket_id,
                     role=role,
                     content=content,
@@ -91,23 +93,27 @@ class MessageStore:
             )
             return sequence
 
-    def rows(self, session_id: str, *, limit: int = 200) -> list[MessageRow]:
+    def rows(
+        self, session_id: str, *, thread_id: str | None = None, limit: int = 200
+    ) -> list[MessageRow]:
         if limit < 1 or limit > 500:
             raise ValueError("message_limit_invalid")
         with Session(self.engine) as db:
             if db.get(SessionRow, session_id) is None:
                 raise BusinessError("session_not_found", 404)
+            statement = select(MessageRow).where(MessageRow.session_id == session_id)
+            if thread_id is not None:
+                statement = statement.where(MessageRow.thread_id == thread_id)
             rows = db.scalars(
-                select(MessageRow)
-                .where(MessageRow.session_id == session_id)
-                .order_by(MessageRow.sequence.desc())
-                .limit(limit)
+                statement.order_by(MessageRow.sequence.desc()).limit(limit)
             ).all()
             return list(reversed(rows))
 
-    def langchain_messages(self, session_id: str, *, limit: int = 200) -> list[AnyMessage]:
+    def langchain_messages(
+        self, session_id: str, *, thread_id: str | None = None, limit: int = 200
+    ) -> list[AnyMessage]:
         messages: list[AnyMessage] = []
-        for row in self.rows(session_id, limit=limit):
+        for row in self.rows(session_id, thread_id=thread_id, limit=limit):
             if row.role == "user":
                 messages.append(HumanMessage(content=row.content))
             elif row.role == "assistant":
@@ -118,10 +124,12 @@ class MessageStore:
                 messages.append(ChatMessage(role="operator", content=row.content))
         return messages
 
-    def checkpoint_messages(self, session_id: str, *, limit: int = 200) -> list[AnyMessage]:
+    def checkpoint_messages(
+        self, session_id: str, *, thread_id: str | None = None, limit: int = 200
+    ) -> list[AnyMessage]:
         """Return a redacted projection safe for checkpoint serialization."""
         projected: list[AnyMessage] = []
-        for message in self.langchain_messages(session_id, limit=limit):
+        for message in self.langchain_messages(session_id, thread_id=thread_id, limit=limit):
             content = (
                 redact_checkpoint_content(message.content)
                 if isinstance(message.content, str)

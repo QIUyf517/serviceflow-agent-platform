@@ -1,7 +1,9 @@
 """Authenticated retail operations. All authorization is server side."""
 
+import json
 from collections import Counter
 from copy import deepcopy
+from hashlib import sha256
 from time import time
 from typing import Any, Literal
 from uuid import uuid4
@@ -9,9 +11,19 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import AuditRow, Base, OrderRow, ProductRow, ProposalRow, SessionRow, UserRow
+from app.database import (
+    AuditRow,
+    Base,
+    OrderCreationRow,
+    OrderRow,
+    ProductRow,
+    ProposalRow,
+    SessionRow,
+    UserRow,
+)
 
 
 class BusinessError(Exception):
@@ -42,6 +54,20 @@ class ActionValidation(BaseModel):
     eligible: bool
     code: str | None
     order_status: str
+
+
+class CheckoutItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    item_id: str = Field(min_length=1, max_length=128)
+    quantity: int = Field(ge=1, le=10)
+
+
+class CheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    items: list[CheckoutItem] = Field(min_length=1, max_length=20)
+    payment_method_id: str = Field(min_length=1, max_length=128)
 
 
 class RetailService:
@@ -120,6 +146,193 @@ class RetailService:
         with Session(self.engine) as db:
             user = self._session(db, sid).user_id
             return deepcopy(db.get(UserRow, user).profile_json)
+
+    @staticmethod
+    def _checkout_digest(request: CheckoutRequest) -> tuple[str, dict[str, Any]]:
+        quantities = Counter[str]()
+        for item in request.items:
+            quantities[item.item_id] += item.quantity
+        if sum(quantities.values()) > 20 or any(quantity > 10 for quantity in quantities.values()):
+            raise BusinessError("checkout_quantity_invalid", 422)
+        normalized = {
+            "items": [
+                {"item_id": item_id, "quantity": quantity}
+                for item_id, quantity in sorted(quantities.items())
+            ],
+            "payment_method_id": request.payment_method_id,
+        }
+        encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return sha256(encoded.encode("utf-8")).hexdigest(), normalized
+
+    @staticmethod
+    def _validate_checkout_key(value: str) -> str:
+        if not 16 <= len(value) <= 128 or any(char.isspace() for char in value):
+            raise BusinessError("idempotency_key_invalid", 422)
+        return value
+
+    @staticmethod
+    def _checkout_replay(
+        row: OrderCreationRow, *, sid: str, user_id: str, digest: str
+    ) -> dict[str, Any]:
+        if (
+            row.session_id != sid
+            or row.user_id != user_id
+            or row.parameters_digest != digest
+        ):
+            raise BusinessError("idempotency_key_conflict", 409)
+        result = deepcopy(row.result_json)
+        result["idempotent_replay"] = True
+        return result
+
+    def checkout(
+        self, sid: str, request: CheckoutRequest, *, idempotency_key: str
+    ) -> dict[str, Any]:
+        """Create one simulated order from authoritative catalog and account data."""
+        key = self._validate_checkout_key(idempotency_key)
+        digest, normalized = self._checkout_digest(request)
+        try:
+            with Session(self.engine) as db, db.begin():
+                session = self._session(db, sid)
+                user_id = session.user_id
+                existing = db.scalar(
+                    select(OrderCreationRow).where(OrderCreationRow.idempotency_key == key)
+                )
+                if existing is not None:
+                    return self._checkout_replay(
+                        existing, sid=sid, user_id=user_id, digest=digest
+                    )
+
+                user_row = db.get(UserRow, user_id)
+                if user_row is None:
+                    raise BusinessError("identity_required", 403)
+                user = deepcopy(user_row.profile_json)
+                payment = self._method(user, request.payment_method_id)
+
+                requested_ids = {item["item_id"] for item in normalized["items"]}
+                variants: dict[str, tuple[ProductRow, dict[str, Any]]] = {}
+                for product in db.scalars(select(ProductRow)):
+                    for item_id, variant in product.product_json["variants"].items():
+                        if item_id in requested_ids:
+                            variants[item_id] = (product, variant)
+
+                order_items: list[dict[str, Any]] = []
+                for requested in normalized["items"]:
+                    found = variants.get(requested["item_id"])
+                    if found is None or not found[1]["available"]:
+                        raise BusinessError("variant_unavailable", 409)
+                    product, variant = found
+                    for _ in range(requested["quantity"]):
+                        order_items.append(
+                            {
+                                "item_id": variant["item_id"],
+                                "product_id": product.source_product_id,
+                                "name": product.name,
+                                "options": deepcopy(variant["options"]),
+                                "price": variant["price"],
+                            }
+                        )
+
+                total = round(sum(item["price"] for item in order_items), 2)
+                if payment["source"] == "gift_card":
+                    if payment.get("balance", 0) < total:
+                        raise BusinessError("gift_card_insufficient", 409)
+                    payment["balance"] = round(payment["balance"] - total, 2)
+
+                order_id = ""
+                for _ in range(20):
+                    candidate = f"#W{int(uuid4().hex[:8], 16) % 10_000_000:07d}"
+                    if db.get(OrderRow, candidate) is None:
+                        order_id = candidate
+                        break
+                if not order_id:
+                    raise BusinessError("order_id_generation_failed", 503)
+
+                order = {
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "address": deepcopy(user["address"]),
+                    "items": order_items,
+                    "status": "pending",
+                    "fulfillments": [],
+                    "payment_history": [
+                        {
+                            "transaction_type": "payment",
+                            "amount": total,
+                            "payment_method_id": request.payment_method_id,
+                        }
+                    ],
+                }
+                now = int(time())
+                result = {
+                    "order": deepcopy(order),
+                    "idempotent_replay": False,
+                    "created_at": now,
+                }
+                db.add(
+                    OrderRow(
+                        source_order_id=order_id,
+                        source_user_id=user_id,
+                        status="pending",
+                        order_json=order,
+                        row_version=1,
+                    )
+                )
+                db.flush()
+                user.setdefault("orders", []).append(order_id)
+                user_row.profile_json = user
+                db.add(
+                    OrderCreationRow(
+                        id=uuid4().hex,
+                        idempotency_key=key,
+                        session_id=sid,
+                        user_id=user_id,
+                        order_id=order_id,
+                        parameters_digest=digest,
+                        request_json=normalized,
+                        result_json=result,
+                        created_at=now,
+                    )
+                )
+                db.flush()
+                return result
+        except IntegrityError as exc:
+            with Session(self.engine) as db:
+                session = self._session(db, sid)
+                existing = db.scalar(
+                    select(OrderCreationRow).where(OrderCreationRow.idempotency_key == key)
+                )
+                if existing is not None:
+                    return self._checkout_replay(
+                        existing, sid=sid, user_id=session.user_id, digest=digest
+                    )
+            raise BusinessError("order_creation_conflict", 409) from exc
+
+    def products(self, sid: str) -> list[dict[str, Any]]:
+        """Return public catalog summaries after validating the browser session."""
+        with Session(self.engine) as db:
+            self._session(db, sid, verified=False)
+            products = db.scalars(
+                select(ProductRow).order_by(ProductRow.name, ProductRow.source_product_id)
+            )
+            summaries: list[dict[str, Any]] = []
+            for row in products:
+                variants = list(row.product_json["variants"].values())
+                prices = [variant["price"] for variant in variants]
+                available = [variant for variant in variants if variant["available"]]
+                summaries.append(
+                    {
+                        "product_id": row.source_product_id,
+                        "name": row.name,
+                        "min_price": min(prices),
+                        "max_price": max(prices),
+                        "available_variants": len(available),
+                        "total_variants": len(variants),
+                        "option_names": sorted(
+                            {name for variant in variants for name in variant["options"]}
+                        ),
+                    }
+                )
+            return summaries
 
     def product(self, sid: str, pid: str, *, public: bool = False) -> dict[str, Any]:
         with Session(self.engine) as db:

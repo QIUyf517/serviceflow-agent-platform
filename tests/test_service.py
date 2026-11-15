@@ -1,7 +1,8 @@
 import pytest
-from app.database import AuditRow, OrderRow, ProposalRow
-from app.service import Action, BusinessError
+from app.database import AuditRow, OrderCreationRow, OrderRow, ProposalRow, UserRow
+from app.service import Action, BusinessError, CheckoutRequest
 from sqlalchemy import event, select
+from sqlalchemy.orm import Session
 
 
 def verified(service):
@@ -23,6 +24,72 @@ def test_query_isolation(service):
     service.verify(other, email="v@example.invalid")
     with pytest.raises(BusinessError, match="order_not_found"):
         service.order(other, "o")
+
+
+def test_public_catalog_uses_a_valid_session_without_exposing_customer_data(service):
+    sid = service.start()
+
+    assert service.products(sid) == [
+        {
+            "product_id": "p",
+            "name": "Test product",
+            "min_price": 12.0,
+            "max_price": 12.0,
+            "available_variants": 1,
+            "total_variants": 1,
+            "option_names": [],
+        }
+    ]
+    assert service.product(sid, "p", public=True)["product_id"] == "p"
+    with pytest.raises(BusinessError, match="identity_required"):
+        service.orders(sid)
+
+
+def test_verified_session_cannot_be_rebound_to_another_customer(service):
+    sid = verified(service)
+
+    with pytest.raises(BusinessError, match="identity_not_verified"):
+        service.verify(sid, email="v@example.invalid")
+
+    assert service.orders(sid)[0]["user_id"] == "u"
+
+
+def test_checkout_is_identity_bound_transactional_and_idempotent(service):
+    with Session(service.engine) as db, db.begin():
+        user = db.get(UserRow, "u")
+        profile = dict(user.profile_json)
+        profile["payment_methods"] = {
+            "card-1": {"id": "card-1", "source": "credit_card", "last_four": "1234"}
+        }
+        user.profile_json = profile
+
+    request = CheckoutRequest(
+        items=[{"item_id": "i", "quantity": 2}], payment_method_id="card-1"
+    )
+    anonymous = service.start()
+    with pytest.raises(BusinessError, match="identity_required"):
+        service.checkout(anonymous, request, idempotency_key="checkout-anonymous-1")
+
+    sid = verified(service)
+    first = service.checkout(sid, request, idempotency_key="checkout-request-0001")
+    assert first["idempotent_replay"] is False
+    assert first["order"]["status"] == "pending"
+    assert len(first["order"]["items"]) == 2
+    assert first["order"]["payment_history"][0]["amount"] == 24.0
+    assert service.order(sid, first["order"]["order_id"]) == first["order"]
+
+    replay = service.checkout(sid, request, idempotency_key="checkout-request-0001")
+    assert replay["order"] == first["order"]
+    assert replay["idempotent_replay"] is True
+    with Session(service.engine) as db:
+        assert len(list(db.scalars(select(OrderCreationRow)))) == 1
+        assert len(list(db.scalars(select(OrderRow)))) == 2
+
+    changed = CheckoutRequest(
+        items=[{"item_id": "i", "quantity": 1}], payment_method_id="card-1"
+    )
+    with pytest.raises(BusinessError, match="idempotency_key_conflict"):
+        service.checkout(sid, changed, idempotency_key="checkout-request-0001")
 
 
 def test_confirm_idempotent_and_guard(service):

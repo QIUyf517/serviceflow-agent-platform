@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'operator'
   text: string
   recovered?: boolean
 }
@@ -43,7 +43,7 @@ export function ConversationPanel({ messages, isPending, errorMessage, onSend }:
         ) : (
           messages.map((item) => (
             <article className={`message message-${item.role}`} key={item.id}>
-              <span>{item.role === 'user' ? '你' : 'ServiceFlow'}</span>
+              <span>{item.role === 'user' ? '你' : item.role === 'operator' ? '人工客服' : '智能客服'}</span>
               <p>{item.text}</p>
               {item.recovered ? <small>由服务端任务状态恢复</small> : null}
             </article>

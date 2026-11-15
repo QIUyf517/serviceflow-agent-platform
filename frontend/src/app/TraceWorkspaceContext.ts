@@ -6,6 +6,7 @@ export interface TraceWorkspaceValue {
   latest: ConversationResponse | null
   capturedAt: number | null
   record: (response: ConversationResponse) => void
+  clear: () => void
 }
 
 export const TraceWorkspaceContext = createContext<TraceWorkspaceValue | null>(null)

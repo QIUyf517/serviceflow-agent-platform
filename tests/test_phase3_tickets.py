@@ -4,9 +4,8 @@ import os
 from uuid import uuid4
 
 import pytest
-from app.database import Base, OrderRow, TicketRow, engine_for, seed
+from app.database import Base, MessageRow, OrderRow, TicketRow, engine_for, seed
 from app.main import app, get_execution_service, get_service, get_ticket_service
-from app.multi_agent.conversation import _automatic_handoff
 from app.multi_agent.execution import ExecutionService
 from app.multi_agent.models import EligibilityResult, ResolutionProposal
 from app.multi_agent.workflow import SessionStateStore
@@ -126,40 +125,7 @@ def test_ticket_state_machine_idempotency_redaction_and_audit(service):
         assert db.scalar(select(func.count()).select_from(TicketRow)) == 1
 
 
-@pytest.mark.parametrize(
-    ("outcome", "expected"),
-    [
-        ({"task_status": "unsupported"}, "unsupported_request"),
-        ({"task_status": "route_limit"}, "clarification_exhausted"),
-        ({"task_status": "ineligible"}, "rule_conflict"),
-        (
-            {
-                "task_status": "needs_clarification",
-                "errors": ["policy_evidence_insufficient"],
-                "task_plan": [{"intent": "cancel_order"}],
-            },
-            "high_risk",
-        ),
-        (
-            {
-                "task_status": "proposal_ready",
-                "resolution_proposal": {
-                    "requires_human_review": True,
-                    "risk_flags": ["model_rule_conflict"],
-                },
-            },
-            "rule_conflict",
-        ),
-    ],
-)
-def test_handoff_triggers_are_deterministic(outcome, expected):
-    trigger = _automatic_handoff(outcome)
-    assert trigger is not None and trigger[0] == expected
-
-
-def test_operator_api_is_separate_and_customer_ticket_response_is_honest(
-    service, monkeypatch
-):
+def test_operator_api_is_separate_and_customer_ticket_response_is_honest(service, monkeypatch):
     client, _ = client_for(service, monkeypatch)
     try:
         sid = client.post("/api/v1/sessions").json()["session_id"]
@@ -183,18 +149,14 @@ def test_operator_api_is_separate_and_customer_ticket_response_is_honest(
         assert customer_only.status_code == 401
         listed = client.get("/api/v1/tickets", headers=operator_headers())
         assert listed.status_code == 200 and listed.json()["total"] == 1
-        detail = client.get(
-            f"/api/v1/tickets/{ticket['id']}", headers=operator_headers()
-        ).json()
+        detail = client.get(f"/api/v1/tickets/{ticket['id']}", headers=operator_headers()).json()
         assert detail["session"]["identity_verified"] is False
         assert detail["request"] is None
     finally:
         app.dependency_overrides.clear()
 
 
-def test_chat_human_request_and_unsupported_request_create_idempotent_tickets(
-    service, monkeypatch
-):
+def test_only_explicit_human_request_creates_an_idempotent_ticket(service, monkeypatch):
     client, _ = client_for(service, monkeypatch)
     try:
         sid = client.post("/api/v1/sessions").json()["session_id"]
@@ -221,15 +183,220 @@ def test_chat_human_request_and_unsupported_request_create_idempotent_tickets(
             json={"message": "Sing a song"},
         )
         assert unsupported.status_code == 200
-        assert unsupported.json()["ticket"]["category"] == "unsupported_request"
-        assert "尚未处理完成" in unsupported.json()["final_response"]
+        assert unsupported.json()["ticket"] is None
+        repeated = client.post(
+            "/api/v1/multi-agent/chat",
+            headers={"x-session-id": other},
+            json={"message": "Sing a song again"},
+        )
+        assert repeated.json()["ticket"] is None
+        assert "智能客服当前无法解决" in repeated.json()["final_response"]
+        assert "如需人工客服" in repeated.json()["final_response"]
+        with Session(service.engine) as db:
+            tickets = db.scalars(select(TicketRow).where(TicketRow.session_id == other)).all()
+        assert tickets == []
     finally:
         app.dependency_overrides.clear()
 
 
-def test_approval_cannot_replace_confirmation_and_operator_reuses_executor(
+def test_customer_reply_service_binds_ticket_reopens_and_deduplicates(service):
+    sid = verified(service)
+    other = service.start()
+    service.verify(other, email="v@example.invalid")
+    tickets = TicketService(service.engine, clock=lambda: 1_700_000_100)
+    ticket = tickets.create(
+        sid,
+        category="customer_requested_human",
+        severity="medium",
+        priority=3,
+        reason_code="customer_requested_human",
+        summary="请求人工回复",
+        requested_action={},
+        idempotency_key="phase45c-service-ticket-key",
+        actor="user",
+    )
+    tickets.assign(ticket["id"], "operator-demo", "operator-test")
+    tickets.change_status(ticket["id"], "in_progress", "operator-test")
+    tickets.change_status(ticket["id"], "waiting_customer", "operator-test")
+
+    first = tickets.customer_reply(
+        sid,
+        ticket["id"],
+        "好的，请继续帮我处理。",
+        "phase45c-service-customer-reply",
+    )
+    assert first["status"] == "in_progress"
+    assert first["idempotent_replay"] is False
+
+    replay = tickets.customer_reply(
+        sid,
+        ticket["id"],
+        "好的，请继续帮我处理。",
+        "phase45c-service-customer-reply",
+    )
+    assert replay["sequence"] == first["sequence"]
+    assert replay["idempotent_replay"] is True
+    with pytest.raises(BusinessError, match="ticket_message_idempotency_conflict"):
+        tickets.customer_reply(
+            sid,
+            ticket["id"],
+            "冲突内容",
+            "phase45c-service-customer-reply",
+        )
+    with pytest.raises(BusinessError, match="ticket_not_found"):
+        tickets.customer_reply(
+            other,
+            ticket["id"],
+            "不应写入",
+            "phase45c-service-other-reply",
+        )
+
+    detail = tickets.detail(ticket["id"])
+    assert detail["status"] == "in_progress"
+    assert any(
+        message["role"] == "user" and message["content"] == "好的，请继续帮我处理。"
+        for message in detail["conversation"]
+    )
+    customer_reply_events = [
+        event
+        for event in tickets.audit(ticket["id"])
+        if event["event_type"] == "customer_replied"
+    ]
+    assert len(customer_reply_events) == 1
+
+
+def test_human_ticket_supports_bound_bidirectional_replies_and_is_audited(
     service, monkeypatch
 ):
+    client, _ = client_for(service, monkeypatch)
+    try:
+        sid = verified(service)
+        other = service.start()
+        service.verify(other, email="v@example.invalid")
+        ticket = client.post(
+            "/api/v1/tickets",
+            headers={"x-session-id": sid, "Idempotency-Key": "phase45c-human-reply"},
+            json={
+                "category": "customer_requested_human",
+                "severity": "medium",
+                "priority": 3,
+                "reason_code": "customer_requested_human",
+                "summary": "请求人工回复",
+                "requested_action": {},
+            },
+        ).json()
+        ticket_id = ticket["id"]
+        assert client.get("/api/v1/customer/tickets", headers={"x-session-id": other}).json() == []
+        assert (
+            client.get(
+                f"/api/v1/customer/tickets/{ticket_id}/updates", headers={"x-session-id": other}
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/v1/tickets/{ticket_id}/reply", json={"content": "我来帮您查看。"}
+            ).status_code
+            == 401
+        )
+        reply = client.post(
+            f"/api/v1/tickets/{ticket_id}/reply",
+            headers=operator_headers(),
+            json={"content": "我来帮您查看。"},
+        )
+        assert reply.status_code == 200
+
+        assigned = client.post(
+            f"/api/v1/tickets/{ticket_id}/assign",
+            headers=operator_headers(),
+            json={"assignee": "operator-demo"},
+        )
+        assert assigned.status_code == 200
+        for status in ("in_progress", "waiting_customer"):
+            changed = client.post(
+                f"/api/v1/tickets/{ticket_id}/status",
+                headers=operator_headers(),
+                json={"status": status},
+            )
+            assert changed.status_code == 200
+
+        updates = client.get(
+            f"/api/v1/customer/tickets/{ticket_id}/updates", headers={"x-session-id": sid}
+        ).json()
+        assert updates["messages"][0]["content"] == "我来帮您查看。"
+
+        customer_headers = {
+            "x-session-id": sid,
+            "Idempotency-Key": "phase45c-customer-reply-0001",
+        }
+        customer_reply = client.post(
+            f"/api/v1/customer/tickets/{ticket_id}/messages",
+            headers=customer_headers,
+            json={"content": "好的，请继续帮我处理。"},
+        )
+        assert customer_reply.status_code == 200
+        assert customer_reply.json()["status"] == "in_progress"
+        assert customer_reply.json()["idempotent_replay"] is False
+
+        replay = client.post(
+            f"/api/v1/customer/tickets/{ticket_id}/messages",
+            headers=customer_headers,
+            json={"content": "好的，请继续帮我处理。"},
+        )
+        assert replay.status_code == 200
+        assert replay.json()["sequence"] == customer_reply.json()["sequence"]
+        assert replay.json()["idempotent_replay"] is True
+        assert (
+            client.post(
+                f"/api/v1/customer/tickets/{ticket_id}/messages",
+                headers=customer_headers,
+                json={"content": "同一个请求标识不能改成其他内容。"},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                f"/api/v1/customer/tickets/{ticket_id}/messages",
+                headers={
+                    "x-session-id": other,
+                    "Idempotency-Key": "phase45c-other-customer-reply",
+                },
+                json={"content": "不应写入。"},
+            ).status_code
+            == 404
+        )
+
+        detail = client.get(f"/api/v1/tickets/{ticket_id}", headers=operator_headers()).json()
+        assert any(message["role"] == "operator" for message in detail["conversation"])
+        assert any(
+            message["role"] == "user" and message["content"] == "好的，请继续帮我处理。"
+            for message in detail["conversation"]
+        )
+        assert detail["status"] == "in_progress"
+        assert detail["order"] is None
+        audit = client.get(f"/api/v1/tickets/{ticket_id}/audit", headers=operator_headers()).json()
+        assert any(item["event_type"] == "operator_replied" for item in audit["events"])
+        assert any(item["event_type"] == "customer_replied" for item in audit["events"])
+        with Session(service.engine) as db:
+            customer_messages = db.scalars(
+                select(MessageRow).where(
+                    MessageRow.ticket_id == ticket_id,
+                    MessageRow.role == "user",
+                )
+            ).all()
+            assistant_messages = db.scalars(
+                select(MessageRow).where(
+                    MessageRow.ticket_id == ticket_id,
+                    MessageRow.role == "assistant",
+                )
+            ).all()
+        assert len(customer_messages) == 1
+        assert assistant_messages == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_approval_cannot_replace_confirmation_and_operator_reuses_executor(service, monkeypatch):
     client, execution = client_for(service, monkeypatch)
     try:
         sid = verified(service)
@@ -270,9 +437,7 @@ def test_approval_cannot_replace_confirmation_and_operator_reuses_executor(
         )
         assert decided.status_code == 200
 
-        premature = client.post(
-            f"/api/v1/tickets/{ticket_id}/execute", headers=operator_headers()
-        )
+        premature = client.post(f"/api/v1/tickets/{ticket_id}/execute", headers=operator_headers())
         assert premature.status_code == 409
         assert premature.json()["error"]["code"] == "confirmation_required"
         assert service.order(sid, "o")["status"] == "pending"
@@ -283,9 +448,7 @@ def test_approval_cannot_replace_confirmation_and_operator_reuses_executor(
             decision="confirm",
             confirmation_text=request.confirmation_text,
         )
-        result = client.post(
-            f"/api/v1/tickets/{ticket_id}/execute", headers=operator_headers()
-        )
+        result = client.post(f"/api/v1/tickets/{ticket_id}/execute", headers=operator_headers())
         assert result.status_code == 200
         assert result.json()["after_status"] == "cancelled"
         replay = client.post(

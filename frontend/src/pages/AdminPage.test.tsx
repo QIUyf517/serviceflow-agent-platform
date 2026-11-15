@@ -9,6 +9,7 @@ const TICKET: TicketRecord = {
   id: 'ticket-1',
   ticket_no: 'TK-2026-0001',
   session_id: 'session-customer-1',
+  thread_id: 'thread-#W100',
   user_id: 'user-1',
   order_id: '#W100',
   request_id: 'request-1',
@@ -30,6 +31,30 @@ const TICKET: TicketRecord = {
 const DETAIL: TicketDetail = {
   ...TICKET,
   session: { session_id: 'session-customer-1', identity_verified: true },
+  thread: { thread_id: 'thread-#W100', kind: 'order', order_id: '#W100', status: 'open' },
+  related_tickets: {
+    same_order: [
+      {
+        id: 'ticket-0',
+        ticket_no: 'TK-2026-0000',
+        order_id: '#W100',
+        status: 'resolved',
+        created_at: 1_699_000_000,
+      },
+    ],
+    other_orders: {
+      total: 1,
+      items: [
+        {
+          id: 'ticket-2',
+          ticket_no: 'TK-2026-0002',
+          order_id: '#W200',
+          status: 'open',
+          created_at: 1_700_000_030,
+        },
+      ],
+    },
+  },
   request: {
     request_id: 'request-1',
     action: 'cancel',
@@ -86,6 +111,7 @@ type BackendOptions = {
 
 function installBackend(options: BackendOptions = {}) {
   let executeCalls = 0
+  const operatorReplies: TicketDetail['conversation'] = []
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const request = requestOf(input, init)
     const url = new URL(request.url)
@@ -97,7 +123,9 @@ function installBackend(options: BackendOptions = {}) {
       const limit = Number(url.searchParams.get('limit') ?? 10)
       return json({ items: [TICKET], total: 21, offset, limit })
     }
-    if (request.method === 'GET' && url.pathname === '/api/v1/tickets/ticket-1') return json(DETAIL)
+    if (request.method === 'GET' && url.pathname === '/api/v1/tickets/ticket-1') {
+      return json({ ...DETAIL, conversation: [...DETAIL.conversation, ...operatorReplies] })
+    }
     if (request.method === 'GET' && url.pathname.endsWith('/ticket-1/audit')) {
       return json({
         ticket_id: 'ticket-1',
@@ -122,6 +150,17 @@ function installBackend(options: BackendOptions = {}) {
       executeCalls += 1
       if (options.execute) return options.execute(executeCalls)
       return json({ error: { code: 'confirmation_required' } }, 409)
+    }
+    if (request.method === 'POST' && url.pathname.endsWith('/reply')) {
+      const body = await request.json() as { content: string }
+      const reply = {
+        role: 'operator' as const,
+        content: body.content,
+        sequence: 3 + operatorReplies.length,
+        created_at: 1_700_000_030 + operatorReplies.length,
+      }
+      operatorReplies.push(reply)
+      return json(reply)
     }
     if (request.method === 'POST' && url.pathname.endsWith('/status')) return json(TICKET)
     throw new Error(`Unhandled request: ${request.method} ${request.url}`)
@@ -196,6 +235,25 @@ describe('AdminPage', () => {
     await user.click(screen.getByRole('button', { name: '更新状态' }))
     expect(screen.getByRole('alert')).toHaveTextContent('必须选择合法 close_reason')
     expect(fetchMock.mock.calls.filter(([input, init]) => inputUrl(input).endsWith('/status') && init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('keeps the message history and reply composer in one operator chat window', async () => {
+    const user = userEvent.setup()
+    const fetchMock = installBackend()
+    renderAdmin()
+    await openTicket(user)
+
+    const chat = screen.getByRole('region', { name: '与顾客对话' })
+    expect(within(chat).getByText('顾客')).toBeInTheDocument()
+    expect(within(chat).getByText(/每 5 秒同步一次/)).toBeInTheDocument()
+
+    await user.type(within(chat).getByLabelText('回复顾客'), '我正在核对，请稍候。')
+    await user.click(within(chat).getByRole('button', { name: '发送人工回复' }))
+
+    expect(await within(chat).findByText('我正在核对，请稍候。')).toBeInTheDocument()
+    expect(within(chat).getByText('人工客服')).toBeInTheDocument()
+    const replyCall = fetchMock.mock.calls.find(([input]) => inputUrl(input).endsWith('/reply'))
+    expect(replyCall).toBeDefined()
   })
 
   it('does not treat an approved operator approval as customer confirmation', async () => {

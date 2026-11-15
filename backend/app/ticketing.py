@@ -10,7 +10,7 @@ from time import time
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,10 +23,12 @@ from app.database import (
     MessageRow,
     OrderRow,
     SessionRow,
+    SupportThreadRow,
     TicketRow,
 )
 from app.multi_agent.message_store import redact_checkpoint_content
 from app.service import BusinessError
+from app.support_threads import ensure_support_thread_schema, get_or_create_thread
 
 TicketCategory = Literal[
     "unsupported_request",
@@ -116,8 +118,11 @@ def ticket_idempotency_key(
     reason_code: str,
     *,
     request_id: str | None = None,
+    thread_id: str | None = None,
 ) -> str:
-    material = f"{session_id}\0{category}\0{reason_code}\0{request_id or ''}"
+    material = (
+        f"{session_id}\0{category}\0{reason_code}\0{request_id or ''}\0{thread_id or ''}"
+    )
     return "ticket-" + hashlib.sha256(material.encode()).hexdigest()
 
 
@@ -128,6 +133,37 @@ class TicketService:
         self.engine = engine
         self.clock = clock
         Base.metadata.create_all(engine)
+        ensure_support_thread_schema(engine)
+        if engine.dialect.name == "postgresql":
+            schema = engine.get_execution_options().get("schema_translate_map", {}).get(None)
+            with engine.begin() as connection:
+                connection.exec_driver_sql("SELECT pg_advisory_xact_lock(58326004)")
+                checks = inspect(connection).get_check_constraints("audit_events", schema=schema)
+                existing = next(
+                    (check for check in checks if check["name"] == "ck_audit_events_event_type"),
+                    None,
+                )
+                if existing and (
+                    "operator_replied" not in existing["sqltext"]
+                    or "customer_replied" not in existing["sqltext"]
+                ):
+                    quote = engine.dialect.identifier_preparer.quote
+                    table = (
+                        f"{quote(schema)}.{quote('audit_events')}"
+                        if schema
+                        else quote("audit_events")
+                    )
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {table} DROP CONSTRAINT ck_audit_events_event_type"
+                    )
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD CONSTRAINT ck_audit_events_event_type "
+                        "CHECK (event_type IN ('ticket_created', 'ticket_assigned', "
+                        "'ticket_status_changed', 'approval_requested', 'approval_decided', "
+                        "'handoff_started', 'handoff_returned', 'recovery_attempted', "
+                        "'recovery_succeeded', 'recovery_failed', 'operator_replied', "
+                        "'customer_replied'))"
+                    )
 
     @staticmethod
     def _audit(
@@ -159,6 +195,7 @@ class TicketService:
             "id": ticket.id,
             "ticket_no": ticket.ticket_no,
             "session_id": ticket.session_id,
+            "thread_id": ticket.thread_id,
             "user_id": ticket.user_id,
             "order_id": ticket.order_id,
             "request_id": ticket.request_id,
@@ -217,6 +254,7 @@ class TicketService:
         actor: TicketActor,
         order_id: str | None = None,
         request_id: str | None = None,
+        thread_id: str | None = None,
         agent_state: dict[str, Any] | None = None,
         customer_explicit: bool = False,
     ) -> dict[str, Any]:
@@ -232,9 +270,7 @@ class TicketService:
             raise BusinessError("ticket_reason_invalid", 422)
         if not summary.strip():
             raise BusinessError("ticket_summary_required", 422)
-        if not 16 <= len(idempotency_key) <= 128 or any(
-            char.isspace() for char in idempotency_key
-        ):
+        if not 16 <= len(idempotency_key) <= 128 or any(char.isspace() for char in idempotency_key):
             raise BusinessError("ticket_idempotency_key_invalid", 422)
         safe_summary = redact_checkpoint_content(summary.strip())[:1_000]
         safe_action = sanitize_ticket_payload(requested_action)
@@ -258,6 +294,7 @@ class TicketService:
             ),
             session_id=session_id,
             user_id=None,
+            thread_id=thread_id,
             order_id=order_id,
             request_id=request_id,
             category=category,
@@ -278,16 +315,12 @@ class TicketService:
         try:
             with Session(self.engine) as db, db.begin():
                 session = db.scalar(
-                    select(SessionRow)
-                    .where(SessionRow.id == session_id)
-                    .with_for_update()
+                    select(SessionRow).where(SessionRow.id == session_id).with_for_update()
                 )
                 if session is None:
                     raise BusinessError("session_not_found", 404)
                 existing = db.scalar(
-                    select(TicketRow).where(
-                        TicketRow.idempotency_key == idempotency_key
-                    )
+                    select(TicketRow).where(TicketRow.idempotency_key == idempotency_key)
                 )
                 if existing is not None:
                     if existing.session_id != session_id:
@@ -295,6 +328,15 @@ class TicketService:
                     result = self._ticket(existing)
                     result["idempotent_replay"] = True
                     return result
+                thread = None
+                if thread_id is not None:
+                    thread = db.get(SupportThreadRow, thread_id)
+                    if thread is None or thread.session_id != session_id:
+                        raise BusinessError("support_thread_not_found", 404)
+                    if thread.order_id is not None:
+                        if order_id is not None and order_id != thread.order_id:
+                            raise BusinessError("ticket_thread_order_mismatch", 409)
+                        ticket.order_id = thread.order_id
                 request = None
                 if request_id is not None:
                     request = db.get(ExecutionRequestRow, request_id)
@@ -302,8 +344,14 @@ class TicketService:
                         raise BusinessError("execution_request_not_found", 404)
                     if request.user_id != session.user_id:
                         raise BusinessError("execution_request_not_found", 404)
-                    if order_id is not None and order_id != request.order_id:
+                    if ticket.order_id is not None and ticket.order_id != request.order_id:
                         raise BusinessError("ticket_request_binding_invalid", 409)
+                    if (
+                        thread is not None
+                        and thread.order_id is not None
+                        and request.order_id != thread.order_id
+                    ):
+                        raise BusinessError("ticket_thread_order_mismatch", 409)
                     ticket.order_id = request.order_id
                 if ticket.order_id is not None:
                     if session.user_id is None:
@@ -311,6 +359,17 @@ class TicketService:
                     order = db.get(OrderRow, ticket.order_id)
                     if order is None or order.source_user_id != session.user_id:
                         raise BusinessError("order_not_found", 404)
+                if thread is None:
+                    thread = get_or_create_thread(
+                        db,
+                        session_id=session_id,
+                        user_id=session.user_id,
+                        order_id=ticket.order_id,
+                        now=now,
+                    )
+                elif thread.user_id is None and session.user_id is not None:
+                    thread.user_id = session.user_id
+                ticket.thread_id = thread.id
                 ticket.user_id = session.user_id
                 db.add(ticket)
                 db.flush()
@@ -334,9 +393,7 @@ class TicketService:
         except IntegrityError as exc:
             with Session(self.engine) as db:
                 existing = db.scalar(
-                    select(TicketRow).where(
-                        TicketRow.idempotency_key == idempotency_key
-                    )
+                    select(TicketRow).where(TicketRow.idempotency_key == idempotency_key)
                 )
                 if existing is None or existing.session_id != session_id:
                     raise BusinessError("ticket_idempotency_key_conflict", 409) from exc
@@ -394,16 +451,19 @@ class TicketService:
         with Session(self.engine) as db:
             ticket = self._get_ticket(db, ticket_id)
             session = db.get(SessionRow, ticket.session_id)
+            thread = db.get(SupportThreadRow, ticket.thread_id) if ticket.thread_id else None
             request = (
                 db.get(ExecutionRequestRow, ticket.request_id)
                 if ticket.request_id and ticket.user_id is not None
                 else None
             )
+            statement = select(MessageRow)
+            if ticket.thread_id is not None:
+                statement = statement.where(MessageRow.thread_id == ticket.thread_id)
+            else:
+                statement = statement.where(MessageRow.ticket_id == ticket.id)
             messages = db.scalars(
-                select(MessageRow)
-                .where(MessageRow.session_id == ticket.session_id)
-                .order_by(MessageRow.sequence.desc())
-                .limit(20)
+                statement.order_by(MessageRow.sequence.desc()).limit(50)
             ).all()
             audit_rows = db.scalars(
                 select(AuditEventRow)
@@ -415,6 +475,17 @@ class TicketService:
                 "session_id": ticket.session_id,
                 "identity_verified": bool(session and session.user_id),
             }
+            result["thread"] = (
+                {
+                    "thread_id": thread.id,
+                    "kind": thread.kind,
+                    "order_id": thread.order_id,
+                    "status": thread.status,
+                }
+                if thread is not None
+                else None
+            )
+            result["related_tickets"] = self._related_tickets(db, ticket)
             result["request"] = (
                 {
                     "request_id": request.id,
@@ -427,6 +498,18 @@ class TicketService:
                     "failure_reason": request.failure_reason,
                 }
                 if request is not None
+                else None
+            )
+            order = db.get(OrderRow, ticket.order_id) if ticket.order_id else None
+            result["order"] = (
+                {
+                    "order_id": order.source_order_id,
+                    "status": order.status,
+                    "item_count": len(order.order_json.get("items") or []),
+                }
+                if order is not None
+                and ticket.user_id is not None
+                and order.source_user_id == ticket.user_id
                 else None
             )
             result["conversation"] = [
@@ -447,6 +530,270 @@ class TicketService:
                 "last_event_at": audit_rows[-1].created_at if audit_rows else None,
             }
             return result
+
+    @staticmethod
+    def _ticket_brief(ticket: TicketRow) -> dict[str, Any]:
+        return {
+            "id": ticket.id,
+            "ticket_no": ticket.ticket_no,
+            "order_id": ticket.order_id,
+            "status": ticket.status,
+            "created_at": ticket.created_at,
+        }
+
+    @classmethod
+    def _related_tickets(cls, db: Session, ticket: TicketRow) -> dict[str, Any]:
+        """Operator-only neighbours of this ticket; grouping never comes from message text."""
+        if ticket.user_id is None:
+            return {"same_order": [], "other_orders": {"total": 0, "items": []}}
+        base = [TicketRow.user_id == ticket.user_id, TicketRow.id != ticket.id]
+        if ticket.order_id is not None:
+            same_filters = [*base, TicketRow.order_id == ticket.order_id]
+            other_filters = [
+                *base,
+                or_(TicketRow.order_id != ticket.order_id, TicketRow.order_id.is_(None)),
+            ]
+        else:
+            same_filters = [*base, TicketRow.order_id.is_(None)]
+            other_filters = [*base, TicketRow.order_id.is_not(None)]
+        same_order = db.scalars(
+            select(TicketRow)
+            .where(*same_filters)
+            .order_by(TicketRow.created_at.desc(), TicketRow.id.desc())
+            .limit(10)
+        ).all()
+        other_total = (
+            db.scalar(select(func.count()).select_from(TicketRow).where(*other_filters)) or 0
+        )
+        other_items = db.scalars(
+            select(TicketRow)
+            .where(*other_filters)
+            .order_by(TicketRow.created_at.desc(), TicketRow.id.desc())
+            .limit(5)
+        ).all()
+        return {
+            "same_order": [cls._ticket_brief(item) for item in same_order],
+            "other_orders": {
+                "total": other_total,
+                "items": [cls._ticket_brief(item) for item in other_items],
+            },
+        }
+
+    def customer_tickets(self, session_id: str) -> list[dict[str, Any]]:
+        with Session(self.engine) as db:
+            session = db.get(SessionRow, session_id)
+            if session is None:
+                raise BusinessError("session_not_found", 404)
+            if session.user_id is None:
+                raise BusinessError("identity_required", 403)
+            tickets = db.scalars(
+                select(TicketRow)
+                .where(TicketRow.session_id == session_id, TicketRow.user_id == session.user_id)
+                .order_by(TicketRow.created_at.desc(), TicketRow.id.desc())
+            ).all()
+            threads = {
+                thread.id: thread
+                for thread in db.scalars(
+                    select(SupportThreadRow).where(
+                        SupportThreadRow.id.in_(
+                            [ticket.thread_id for ticket in tickets if ticket.thread_id]
+                        )
+                    )
+                ).all()
+            } if any(ticket.thread_id for ticket in tickets) else {}
+            return [
+                {
+                    "id": ticket.id,
+                    "ticket_no": ticket.ticket_no,
+                    "status": ticket.status,
+                    "order_id": ticket.order_id,
+                    "thread_id": ticket.thread_id,
+                    "thread_kind": (
+                        threads[ticket.thread_id].kind
+                        if ticket.thread_id in threads
+                        else ("order" if ticket.order_id else "general")
+                    ),
+                    "updated_at": ticket.updated_at,
+                }
+                for ticket in tickets
+            ]
+
+    def customer_updates(self, session_id: str, ticket_id: str) -> dict[str, Any]:
+        with Session(self.engine) as db:
+            session = db.get(SessionRow, session_id)
+            if session is None:
+                raise BusinessError("session_not_found", 404)
+            if session.user_id is None:
+                raise BusinessError("identity_required", 403)
+            ticket = self._get_ticket(db, ticket_id)
+            if ticket.session_id != session_id or ticket.user_id != session.user_id:
+                raise BusinessError("ticket_not_found", 404)
+            messages = db.scalars(
+                select(MessageRow)
+                .where(MessageRow.ticket_id == ticket.id, MessageRow.role == "operator")
+                .order_by(MessageRow.sequence)
+            ).all()
+            return {
+                "ticket_no": ticket.ticket_no,
+                "status": ticket.status,
+                "messages": [
+                    {"sequence": row.sequence, "content": row.content, "created_at": row.created_at}
+                    for row in messages
+                ],
+            }
+
+    def customer_reply(
+        self,
+        session_id: str,
+        ticket_id: str,
+        content: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Append a customer message to an active human ticket without invoking an Agent."""
+        normalized = content.strip()
+        if not normalized or len(normalized) > 2_000:
+            raise BusinessError("ticket_reply_invalid", 422)
+        if (
+            not 16 <= len(idempotency_key) <= 128
+            or any(char.isspace() for char in idempotency_key)
+        ):
+            raise BusinessError("ticket_message_idempotency_key_invalid", 422)
+
+        message_id = "customer-message-" + hashlib.sha256(
+            f"{session_id}\0{idempotency_key}".encode()
+        ).hexdigest()
+        now = int(self.clock())
+        with Session(self.engine) as db, db.begin():
+            customer_session = db.scalar(
+                select(SessionRow).where(SessionRow.id == session_id).with_for_update()
+            )
+            if customer_session is None:
+                raise BusinessError("session_not_found", 404)
+            if customer_session.user_id is None:
+                raise BusinessError("identity_required", 403)
+
+            ticket = self._get_ticket(db, ticket_id, lock=True)
+            if (
+                ticket.session_id != session_id
+                or ticket.user_id != customer_session.user_id
+            ):
+                raise BusinessError("ticket_not_found", 404)
+
+            existing = db.get(MessageRow, message_id)
+            if existing is not None:
+                if (
+                    existing.session_id != session_id
+                    or existing.ticket_id != ticket_id
+                    or existing.role != "user"
+                    or existing.content != normalized
+                ):
+                    raise BusinessError("ticket_message_idempotency_conflict", 409)
+                return {
+                    "sequence": existing.sequence,
+                    "content": existing.content,
+                    "created_at": existing.created_at,
+                    "status": ticket.status,
+                    "idempotent_replay": True,
+                }
+
+            if ticket.status in {"closed", "cancelled"}:
+                raise BusinessError("ticket_terminal", 409)
+
+            sequence = (
+                db.scalar(
+                    select(func.max(MessageRow.sequence)).where(
+                        MessageRow.session_id == session_id
+                    )
+                )
+                or 0
+            ) + 1
+            previous_status = ticket.status
+            if ticket.status in {"waiting_customer", "resolved"}:
+                ticket.status = "in_progress"
+            ticket.updated_at = now
+            db.add(
+                MessageRow(
+                    id=message_id,
+                    session_id=session_id,
+                    thread_id=ticket.thread_id,
+                    ticket_id=ticket.id,
+                    role="user",
+                    content=normalized,
+                    meta={
+                        "source": "customer_ticket",
+                        "idempotency_key_digest": hashlib.sha256(
+                            idempotency_key.encode()
+                        ).hexdigest(),
+                    },
+                    trace_id=None,
+                    sequence=sequence,
+                    created_at=now,
+                )
+            )
+            self._audit(
+                db,
+                ticket,
+                "customer_replied",
+                "user",
+                {
+                    "sequence": sequence,
+                    "previous_status": previous_status,
+                    "status": ticket.status,
+                },
+                created_at=now,
+            )
+            return {
+                "sequence": sequence,
+                "content": normalized,
+                "created_at": now,
+                "status": ticket.status,
+                "idempotent_replay": False,
+            }
+
+    def reply(self, ticket_id: str, content: str, operator_id: str) -> dict[str, Any]:
+        if not content.strip() or len(content) > 2_000:
+            raise BusinessError("ticket_reply_invalid", 422)
+        now = int(self.clock())
+        with Session(self.engine) as db, db.begin():
+            ticket = self._get_ticket(db, ticket_id, lock=True)
+            if ticket.status in {"closed", "cancelled"}:
+                raise BusinessError("ticket_terminal", 409)
+            session = db.scalar(
+                select(SessionRow).where(SessionRow.id == ticket.session_id).with_for_update()
+            )
+            if session is None or session.user_id is None or session.user_id != ticket.user_id:
+                raise BusinessError("identity_required", 403)
+            sequence = (
+                db.scalar(
+                    select(func.max(MessageRow.sequence)).where(
+                        MessageRow.session_id == ticket.session_id
+                    )
+                )
+                or 0
+            ) + 1
+            reply = MessageRow(
+                id=uuid4().hex,
+                session_id=ticket.session_id,
+                thread_id=ticket.thread_id,
+                ticket_id=ticket.id,
+                role="operator",
+                content=redact_checkpoint_content(content.strip()),
+                meta={"operator_id": operator_id},
+                trace_id=None,
+                sequence=sequence,
+                created_at=now,
+            )
+            db.add(reply)
+            ticket.updated_at = now
+            self._audit(
+                db,
+                ticket,
+                "operator_replied",
+                "operator",
+                {"sequence": sequence, "operator_id": operator_id},
+                created_at=now,
+            )
+            return {"sequence": sequence, "content": reply.content, "created_at": now}
 
     def assign(self, ticket_id: str, assignee: str, operator_id: str) -> dict[str, Any]:
         if not assignee.strip() or len(assignee) > 128:
@@ -547,9 +894,7 @@ class TicketService:
                 ticket = self._get_ticket(db, ticket_id, lock=True)
                 bound_request_id = request_id or ticket.request_id
                 request = (
-                    db.get(ExecutionRequestRow, bound_request_id)
-                    if bound_request_id
-                    else None
+                    db.get(ExecutionRequestRow, bound_request_id) if bound_request_id else None
                 )
                 if bound_request_id and (
                     request is None

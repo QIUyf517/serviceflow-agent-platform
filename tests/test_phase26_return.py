@@ -130,7 +130,7 @@ def test_return_two_turn_flow_records_request_not_refund(service):
     assert second["execution_result"]["after_status"] == "return requested"
     assert order["return_item_quantities"] == {"i": 1}
     assert order["return_refund_status"] == "requested_not_disbursed"
-    assert "No real-world refund has been disbursed" in second["final_response"]
+    assert "尚未发生真实退款" in second["final_response"]
 
 
 def test_return_no_confirmation_rejection_and_foreign_owner_do_not_write(service):

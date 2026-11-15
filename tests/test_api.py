@@ -1,7 +1,9 @@
 from app.config import Settings
+from app.database import UserRow
 from app.llm import ModelReply, ModelToolCall
 from app.main import app, get_service
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def test_http_flow(service):
@@ -10,6 +12,10 @@ def test_http_flow(service):
         client = TestClient(app)
         sid = client.post("/api/v1/sessions").json()["session_id"]
         headers = {"x-session-id": sid}
+        catalog = client.get("/api/v1/products", headers=headers)
+        assert catalog.status_code == 200
+        assert catalog.json()[0]["product_id"] == "p"
+        assert client.get("/api/v1/products/p", headers=headers).status_code == 200
         assert client.get("/api/v1/orders/o", headers=headers).status_code == 403
         assert (
             client.post(
@@ -19,6 +25,40 @@ def test_http_flow(service):
         )
         assert client.get("/api/v1/orders/o", headers=headers).json()["status"] == "pending"
         assert client.get("/api/v1/orders/missing", headers=headers).status_code == 404
+        with Session(service.engine) as db, db.begin():
+            user = db.get(UserRow, "u")
+            profile = dict(user.profile_json)
+            profile["payment_methods"] = {
+                "card-1": {"id": "card-1", "source": "credit_card", "last_four": "1234"}
+            }
+            user.profile_json = profile
+        checkout = client.post(
+            "/api/v1/orders",
+            headers={**headers, "Idempotency-Key": "checkout-api-request-0001"},
+            json={"items": [{"item_id": "i", "quantity": 1}], "payment_method_id": "card-1"},
+        )
+        assert checkout.status_code == 200
+        assert checkout.json()["order"]["status"] == "pending"
+        replay = client.post(
+            "/api/v1/orders",
+            headers={**headers, "Idempotency-Key": "checkout-api-request-0001"},
+            json={"items": [{"item_id": "i", "quantity": 1}], "payment_method_id": "card-1"},
+        )
+        assert replay.json()["idempotent_replay"] is True
+        other = client.post("/api/v1/sessions").json()["session_id"]
+        assert (
+            client.post(
+                f"/api/v1/sessions/{other}/verify", json={"email": "v@example.invalid"}
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/v1/orders/o", headers={"x-session-id": other}).status_code == 404
+        assert (
+            client.post(
+                f"/api/v1/sessions/{sid}/verify", json={"email": "v@example.invalid"}
+            ).status_code
+            == 403
+        )
         legacy = client.post(
             "/api/v1/operations",
             headers=headers,

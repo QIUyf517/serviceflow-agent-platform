@@ -47,6 +47,8 @@ export const operatorApi = {
   },
 
   getTicket: (ticketId: string) => operatorRequest<TicketDetail>(ticketPath(ticketId)),
+  replyTicket: (ticketId: string, content: string) =>
+    operatorRequest<{ sequence: number; content: string; created_at: number }>(ticketPath(ticketId, '/reply'), { method: 'POST', body: { content } }),
 
   getAudit: (ticketId: string) =>
     operatorRequest<{ ticket_id: string; events: TicketAuditEvent[] }>(

@@ -56,6 +56,11 @@ def _ids(pattern: re.Pattern[str], message: str) -> list[str]:
     )
 
 
+def mentioned_order_ids(message: str) -> list[str]:
+    """Return explicit order identifiers; never inferred from conversation history."""
+    return _ids(ORDER_ID, message)
+
+
 def _required_information(result: TriageResult) -> TriageResult:
     missing = [
         item
@@ -113,6 +118,14 @@ class MockTriage:
                 "能不能",
                 "可不可以",
                 "怎么规定",
+                "怎么办",
+                "怎么退",
+                "怎么取消",
+                "需要什么",
+                "支持哪些支付",
+                "支付方式",
+                "退款多久",
+                "售后流程",
                 "policy",
                 "rule",
                 "eligible",
@@ -163,7 +176,23 @@ class MockTriage:
             intents.append("modify_order")
         if policy_question:
             intents.append("policy_inquiry")
-        if any(word in lowered for word in ("商品信息", "商品详情", "产品信息", "product")):
+        product_question = any(
+            word in lowered
+            for word in (
+                "商品信息",
+                "商品详情",
+                "产品信息",
+                "产品详情",
+                "product",
+            )
+        ) or (
+            bool(product_id)
+            and any(
+                word in lowered
+                for word in ("价格", "多少钱", "库存", "有货", "规格", "可选", "参数")
+            )
+        )
+        if product_question:
             intents.append("product_inquiry")
         if order_id or ("订单" in phrase or "order" in lowered):
             if any(
@@ -244,16 +273,23 @@ class MockTriage:
             else:
                 action = "get_order_details"
         extracted = (
-            dict(previous.extracted_parameters)
-            if previous and previous.needs_clarification
-            else {}
+            dict(previous.extracted_parameters) if previous and previous.needs_clarification else {}
         )
         reason_match = re.search(r"(?:because|因为)\s*([^,，。]{1,80})", phrase, re.I)
         if reason_match:
             extracted["reason"] = reason_match.group(1).strip()
         elif any(word in lowered for word in ("ordered by mistake", "买错了", "下错单", "误下单")):
             extracted["reason"] = "ordered by mistake"
-        elif any(word in lowered for word in ("no longer needed", "不需要了", "不想要了")):
+        elif any(
+            word in lowered
+            for word in (
+                "no longer needed",
+                "不需要了",
+                "不想要了",
+                "不再需要",
+                "不在需要",  # 常见输入错误；只在明确取消上下文中用作原因。
+            )
+        ):
             extracted["reason"] = "no longer needed"
         for key in ("item_ids", "new_item_ids", "payment_method_id"):
             match = re.search(rf"\b{key}\s*[:=]\s*([#A-Za-z0-9_,-]+)", phrase, re.I)
@@ -352,3 +388,28 @@ class LLMTriage:
             except (ValidationError, ValueError):
                 last_error = "structured_output_invalid"
         raise TriageError(last_error)
+
+
+class ThreadScopedTriage:
+    """Bind a server-resolved order thread without trusting message text."""
+
+    def __init__(self, provider: TriageProvider, order_id: str) -> None:
+        if not order_id.strip():
+            raise ValueError("thread_order_id_invalid")
+        self.provider = provider
+        self.order_id = order_id
+
+    def classify(self, message: str, previous: TriageResult | None = None) -> TriageResult:
+        result = self.provider.classify(message, previous)
+        if result.order_id is None and result.requested_action != "list_orders":
+            missing = [
+                item for item in result.missing_information if item != "order_id"
+            ]
+            result = result.model_copy(
+                update={
+                    "order_id": self.order_id,
+                    "missing_information": missing,
+                    "needs_clarification": bool(missing),
+                }
+            )
+        return result

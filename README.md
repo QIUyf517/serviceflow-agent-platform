@@ -1,6 +1,6 @@
 # ServiceFlow — 可信多 Agent 智能售后平台
 
-> 状态：阶段 4 已完成；用户服务台、管理后台和开发者追踪页已连接真实 API，并通过真实 FastAPI、PostgreSQL 与 Chromium 的浏览器验收。阶段 5 尚未开始；修改/换货执行不在阶段 4 范围。
+> 状态：阶段 4.5C 已完成，并已修复同顾客不同订单的会话串话（4.5D 订单独立会话线程）。模拟商店客服支持内容安全先检、政策/商品/订单/售后分流、多轮追问、按订单恢复会话和人工回复。阶段 4.5 收尾的人工浏览器复核和阶段 5 尚未开始。
 
 ## 项目定位
 
@@ -25,6 +25,10 @@
 - [docs/PHASE4A_REPORT.md](docs/PHASE4A_REPORT.md)：阶段 4A 前端基础与用户服务台验收。
 - [docs/PHASE4B_REPORT.md](docs/PHASE4B_REPORT.md)：阶段 4B 管理后台与开发者追踪页验收。
 - [docs/PHASE4_REPORT.md](docs/PHASE4_REPORT.md)：阶段 4 Compose、真实浏览器验收与总体验收。
+- [docs/PHASE4_5A_REPORT.md](docs/PHASE4_5A_REPORT.md)：阶段 4.5A 模拟商店、顾客会话隔离与真实浏览器验收。
+- [docs/PHASE4_5B_REPORT.md](docs/PHASE4_5B_REPORT.md)：阶段 4.5B 内容安全、咨询分流、售后闭环与真实浏览器验收。
+- [docs/PHASE4_5C_REPORT.md](docs/PHASE4_5C_REPORT.md)：阶段 4.5C 中文体验、双向人工会话与后台聊天窗口。
+- [docs/PHASE4_5D_REPORT.md](docs/PHASE4_5D_REPORT.md)：阶段 4.5D 订单独立会话线程、串话修复与旧库迁移。
 - [docs/DATA_AND_RAG.md](docs/DATA_AND_RAG.md)：τ-bench 下载导入、RAG、数据隔离。
 - [docs/EVALUATION.md](docs/EVALUATION.md)：基线实验、官方与扩展评测、指标。
 - [CODEX_START_HERE.md](CODEX_START_HERE.md)：第一条可以复制给 Codex 的任务提示。
@@ -133,7 +137,7 @@ Invoke-RestMethod -Method Post "http://127.0.0.1:8000/api/v1/operations/$($p.pro
 # 输出：{"proposal_id":"<ID>","status":"succeeded","order_id":"#W0000000","order_status":"cancelled","row_version":2}
 ```
 
-`POST /api/v1/operations` 的 `kind` 还支持 `modify_address`（完整 address）、`modify_payment`（payment_method_id）、`modify_items` / `exchange`（item_ids、new_item_ids、payment_method_id）及 `return`（item_ids、payment_method_id）。全部走同一提案、明确确认、订单版本重校验、数据库事务、幂等和审计路径。`GET /api/v1/users/me`、`GET /api/v1/orders/{id}`、`GET /api/v1/products/{id}` 均要求已核验会话。操作仅修改本地模拟数据库；支付历史变更不是外部资金退款或真实邮件发送。
+`POST /api/v1/operations` 的 `kind` 还支持 `modify_address`（完整 address）、`modify_payment`（payment_method_id）、`modify_items` / `exchange`（item_ids、new_item_ids、payment_method_id）及 `return`（item_ids、payment_method_id）。全部走同一提案、明确确认、订单版本重校验、数据库事务、幂等和审计路径。`GET /api/v1/users/me`、`GET /api/v1/orders`和 `GET /api/v1/orders/{id}` 要求已核验会话；公开商品目录 `GET /api/v1/products` 和 `GET /api/v1/products/{id}` 只要求服务端已建立的有效会话，不返回客户资料。操作仅修改本地模拟数据库；支付历史变更不是外部资金退款或真实邮件发送。
 
 聊天入口 `POST /api/v1/chat` 的输入示例为 `{"message":"cancel order #W0000000 because ordered by mistake"}`，输出包含 `trace_id`、`provider:"mock"`、调用数/耗时、`token_usage:null` 和 `response`（含提案 ID）。之后发送 `{"message":"yes","proposal_id":"<该提案ID>"}` 才可执行。Mock 只识别有限的演示表达；可通过 `ToolSelector` 替换模型，但本轮没有真实模型测试。提案 15 分钟后失效；状态变化需重新提案。原始 τ-bench 任务和评分条件不会进入运行时。
 
@@ -626,7 +630,7 @@ docker compose ps
 
 `db` 健康后才启动 `api`，`api` 健康后才启动 `frontend`。访问入口：
 
-- `http://127.0.0.1:5173/support`：客户身份核验、订单、取消/退货、确认与人工工单。
+- `http://127.0.0.1:5173/store`：模拟商品目录、顾客身份核验、本人订单和内嵌客服；`/support` 保留为兼容跳转。
 - `http://127.0.0.1:5173/admin`：操作员工单、审批和人工代触发。
 - `http://127.0.0.1:5173/developer`：当前任务与成功/失败 trace。
 - `http://127.0.0.1:8000/docs`：FastAPI OpenAPI。
@@ -658,3 +662,182 @@ Set-Location ..
 ```
 
 `test:e2e` 使用 Chromium、真实 FastAPI 和真实 PostgreSQL，为每次运行创建 `phase4_e2e_<随机值>` schema，注入隔离的合成测试数据，并在成功或失败后终止测试进程、删除该 schema。最终实测：后端 **204 passed**；前端 **30 passed**；Playwright **6 passed**；ruff、lint、typecheck、build 全部通过；三个 Compose 服务均 healthy；随机 schema 残留 **0**；外部 LLM 调用 **0**。完整场景、API 映射、风险与历史失败见 [阶段 4 总报告](docs/PHASE4_REPORT.md)。
+
+## 阶段 4.5A：模拟商店与顾客身份
+
+主入口现为 `http://127.0.0.1:5173/store`。中文商城支持搜索、在弹窗中选择商品规格、购物车和模拟下单；规格较多时只在弹窗内部滚动，移动端使用底部抽屉。商品目录可在身份核验前查看；结算、本人订单和客服只在核验后开放。每笔订单内有“联系商家客服”，点击后打开携带该订单号上下文的智能客服对话框。点击“切换模拟顾客”会创建新 session，清除购物车、旧订单、对话、当前任务和内存 trace，并要求重新核验。后端不允许已绑定 session 改绑其他顾客，订单访问始终使用 session 中的服务端身份，不接受前端 `user_id` 授权。
+
+新增目录接口示例：
+
+```http
+POST /api/v1/sessions
+
+GET /api/v1/products
+X-Session-Id: <server-session-id>
+
+GET /api/v1/products/<product-id>
+X-Session-Id: <server-session-id>
+
+POST /api/v1/orders
+X-Session-Id: <verified-server-session-id>
+Idempotency-Key: checkout-<unique-key>
+Content-Type: application/json
+
+{"items":[{"item_id":"<variant-id>","quantity":1}],"payment_method_id":"<account-payment-method-id>"}
+
+HTTP/1.1 200
+{"order":{"order_id":"#W<generated>","status":"pending","items":[...]},"idempotent_replay":false,"created_at":<unix-time>}
+
+GET /api/v1/orders
+X-Session-Id: <unverified-session-id>
+
+HTTP/1.1 403
+{"error":{"code":"identity_required"}}
+```
+
+`GET /products` 返回商品 ID、名称、价格范围、可用/全部规格数和选项名；`GET /products/{id}` 返回完整规格。`POST /orders` 不信任前端传入的价格、顾客、地址或商品信息：它从已核验 session、`products` 与 `users` 重新读取权威值，在同一事务中创建订单、更新顾客订单索引并写入 `order_creations` 幂等审计；同一键同一请求只返回原订单，换内容或换身份使用同一键会返回 409。该接口仅模拟本地订单与支付记录，不调用真实支付渠道。目录、订单和客服均读取同一 PostgreSQL 业务库，不使用前端静态商品或假 API。顾客页通过确定性展示层将固定快照的 50 个英文商品名、全部规格字段和实际规格值转为中文，原始 ID 与上游数据保持不变。
+
+2026-11-13 实测：后端 **208 passed、0 failed、0 skipped**；前端 **8 files、38 passed、0 failed**；Chromium **7 passed、0 failed**；Ruff、ESLint、TypeScript 和生产构建均通过；PostgreSQL/FastAPI/frontend 三个 Compose 服务均 healthy；E2E 随机 schema 残留 **0**；外部 LLM 调用 **0**。详见 [阶段 4.5A 报告](docs/PHASE4_5A_REPORT.md)。
+
+## 阶段 4.5B：咨询分流与售后闭环
+
+`POST /api/v1/multi-agent/chat` 现在先执行不调用外部模型的内容安全检查，再分流到 FAQ/政策、实时商品、本人订单/物流、取消/退货、含糊或超范围请求。检查使用有上下文的短语规则，不因“杀”、“取消”等单一词误拦正常商品或售后咨询。它是当前演示范围内的确定性基线，不应被误解为能覆盖任意自然语言风险的通用安全分类器。
+
+咨询结果增加 `consultation_route` 与 `safety` 字段；开发者 trace 的第一个节点为 `content_safety`。政策回答仅使用现有政策索引命中的条款并附来源；商品价格/可用性来自当前 `products` 表；订单查询继续从服务端 session 获得客户身份并校验归属。正常业务缺少必要参数（如取消原因）时只追问，不误称“无法解决”；含糊、超范围、证据不足、数据不可用、规则冲突或执行失败时，系统说明当前无法解决并提示可回复“转人工”，无论重复失败多少次都不自动建单。明确要求转人工才会建单，仅询问“你是人工客服吗”不会误触发。
+
+API 示例（需使用已核验的服务端 session）：
+
+```http
+POST /api/v1/multi-agent/chat
+X-Session-Id: <verified-server-session-id>
+Content-Type: application/json
+
+{"message":"商品 9523456873 现在多少钱？"}
+
+HTTP/1.1 200
+{
+  "task_status":"queried",
+  "consultation_route":"product",
+  "safety":{"allowed":true,"category":"allowed","reason_code":null},
+  "final_response":"商品 T 恤（商品标识 9523456873）当前有 ..."
+}
+```
+
+```http
+POST /api/v1/multi-agent/chat
+X-Session-Id: <verified-server-session-id>
+Content-Type: application/json
+
+{"message":"取消订单需要什么条件？"}
+
+HTTP/1.1 200
+{
+  "task_status":"policy_answered",
+  "consultation_route":"faq_policy",
+  "final_response":"根据当前检索到的政策资料：...\n\n来源：\n- policy.md § Cancel pending order"
+}
+```
+
+取消和退货仍使用阶段 2.5B–2.6 的硬边界：具体提案 → 客户明确确认 → 执行前重读订单 → 硬规则 → 事务/幂等/审计。前端只在服务端返回 `execution_result.status=succeeded` 时刷新订单列表和当前详情，不根据自然语言“成功”字样更改界面状态。
+
+2026-11-14 最终实测：后端 **220 passed、0 failed、0 skipped**；前端 **8 files、39 passed、0 failed**；Chromium + 真实 FastAPI/PostgreSQL **8 passed、0 failed**；Ruff、ESLint、TypeScript 和生产构建均通过；E2E 随机 schema 残留 **0**；Compose 的 db/api/frontend 均 healthy；外部 LLM 调用 **0**。详见 [阶段 4.5B 报告](docs/PHASE4_5B_REPORT.md)。4.5C 和阶段 4.5 收尾尚未开始。
+
+## 阶段 4.5C：中文体验与人工接管
+
+客户明确转人工后，商家后台自动检查新工单，可在工单详情中查看脱敏会话与归属核验后的订单状态及商品项数量，输入人工回复。人工回复会保存到同一业务数据库，并在顾客客服窗口显示。工单状态使用中文展示；人工回复和审批都不构成客户对订单写操作的确认。
+
+活动人工工单建立后，顾客继续输入的内容不再交给 Agent，而是通过独立的顾客工单消息接口绑定到同一 `ticket_id`。服务端重新校验已核验会话、顾客和工单归属，使用幂等键防止重复消息，并写入不含消息正文的 `customer_replied` 审计事件。若工单原为 `waiting_customer` 或 `resolved`，顾客回复会将其恢复为 `in_progress`。管理后台当前工单详情与审计每 5 秒刷新，即使标签页处于后台也能读取新消息。
+
+顾客客服支持在同一已核验会话中连续追问。刷新页面后，从服务端 `messages` 表恢复最近 200 条顾客、智能客服和人工消息；切换模拟顾客会建立新会话，不能读取上一位顾客的对话。取消订单时可先问原因，顾客补充“不再需要了”（含常见错字“不在需要了”）后生成具体操作提案；仍须顾客明确确认才会执行取消。历史接口示例：
+
+```powershell
+$h = @{ 'x-session-id' = $sid } # 已核验的本顾客会话
+Invoke-RestMethod 'http://127.0.0.1:8000/api/v1/customer/conversation' -Headers $h
+# 输出示例：[{"sequence":1,"role":"user","content":"取消这个订单","created_at":1730000000}]
+```
+
+```http
+POST /api/v1/tickets/<ticket-id>/reply
+X-Operator-Token: <demo-operator-token>
+Content-Type: application/json
+
+{"content":"人工客服正在核对这笔订单。"}
+
+HTTP/1.1 200
+{"sequence":8,"content":"人工客服正在核对这笔订单。","created_at":<unix-time>}
+
+GET /api/v1/customer/tickets/<ticket-id>/updates
+X-Session-Id: <verified-customer-session>
+
+HTTP/1.1 200
+{"ticket_no":"<ticket-no>","status":"open","messages":[{"sequence":8,"content":"人工客服正在核对这笔订单。","created_at":<unix-time>}]}
+```
+
+顾客在人工工单中的后续回复使用独立接口，不调用 `/api/v1/multi-agent/chat`：
+
+```http
+POST /api/v1/customer/tickets/<ticket-id>/messages
+X-Session-Id: <verified-customer-session>
+Idempotency-Key: customer-message-<random-id>
+Content-Type: application/json
+
+{"content":"好的，请继续帮我处理。"}
+
+HTTP/1.1 200
+{"sequence":9,"content":"好的，请继续帮我处理。","created_at":<unix-time>,"status":"in_progress","idempotent_replay":false}
+```
+
+2026-11-15 双向人工会话修订后实测：后端 **226 passed**，前端 **8 files、40 passed**，真实 FastAPI/PostgreSQL/Chromium **10 passed**，临时 schema 残留 **0**；Ruff、lint、typecheck、build 均通过。浏览器场景使用两个标签页验证“人工回复到达顾客 → 顾客继续回复 → 已打开的后台自动显示”，同时断言顾客后续消息不进入 Agent。详见 [阶段 4.5C 报告](docs/PHASE4_5C_REPORT.md)。阶段 4.5 收尾的人工作业仍需在更新后的页面复核后勾选。
+
+刷新恢复兼容说明：旧版本从订单对话自然语言“转人工”创建的活动工单可能没有 `order_id`。阶段 4.5D 起，这类未绑定订单的工单固定归入“通用咨询”线程，不再自动挂到任意订单窗口；订单窗口只恢复与本订单线程绑定的工单。旧 LangGraph 检查点也会按当前状态模型补齐缺失通道，避免升级后因缺少 `triage_result` 返回 500。该修订验证结果为真实 PostgreSQL 后端 **227 passed**、前端 **8 files、41 passed**，静态检查与生产构建通过。
+
+人工后台的会话记录与回复输入现已合并为同一个聊天窗口。顾客消息左对齐、人工客服右对齐、智能客服历史使用中性样式；打开工单后仍每 5 秒同步详情，并自动显示最新消息。回复框位于消息区正下方，Enter 发送、Shift+Enter 换行。分配、状态流转、审批和代执行保留在单独的“工单治理”区域，人工回复不构成客户确认。该界面修订后前端 **8 files、42 passed**，ESLint、TypeScript、生产构建和实际页面视觉检查通过。
+
+## 阶段 4.5D：订单独立会话线程（串话修复）
+
+阶段 4.5C 的人工工单详情按 `session_id` 读取最近 20 条消息，同一顾客的不同订单会混进同一个客服窗口。4.5D 不再用会话或消息文本近似订单范围，而是引入服务端拥有的 `support_threads`：
+
+- 每个 `(session, order)` 一条 `kind='order'` 线程；每会话一条 `kind='general'` 通用咨询线程。
+- `messages.thread_id` 与 `tickets.thread_id` 绑定线程；工单详情只返回本线程消息。
+- 顾客发送的 `order_id` 只是请求参数；线程由服务端在核验身份并校验订单归属后创建或恢复，客户端不能指定 `thread_id` 越权读取。
+- LangGraph 检查点按线程隔离，订单 A 的意图、补充信息和待确认请求不会出现在订单 B。
+- 订单线程内的消息若提及另一笔订单，服务端直接拒绝并提示从该订单重新打开客服窗口。
+
+### 线程 API
+
+```http
+POST /api/v1/support/threads
+X-Session-Id: <verified-customer-session>
+Content-Type: application/json
+
+{"order_id":"#W1006327"}
+
+HTTP/1.1 200
+{"thread_id":"<thread-id>","kind":"order","order_id":"#W1006327","status":"open","created_at":<unix-time>,"updated_at":<unix-time>}
+```
+
+`{}` 返回该会话的“通用咨询”线程；其他顾客的订单返回 404，未核验会话请求订单线程返回 403。聊天、任务恢复和会话历史都接受 `order_id`，服务端再次解析线程：
+
+```http
+POST /api/v1/multi-agent/chat          {"message":"帮我取消订单","order_id":"#W1006327"}
+GET  /api/v1/multi-agent/tasks/current?order_id=#W1006327
+GET  /api/v1/customer/conversation?order_id=#W1006327
+```
+
+响应新增 `thread_id`、`thread_order_id`、`thread_kind`；工单详情新增 `thread` 与 `related_tickets`（同一订单历史、其他订单数量，默认折叠）。顾客端标题固定显示“正在咨询订单 #…”，切换订单即切换线程并清空上一订单的确认状态；刷新页面会恢复上次打开的订单窗口及其线程。
+
+### 旧数据迁移
+
+列与表的结构升级在服务启动时幂等执行，也可单独运行：
+
+```powershell
+$env:PYTHONPATH="backend"
+.\.venv_tau\Scripts\python.exe scripts/migrate_support_threads.py
+# 示例输出：{"order_threads_created":2,"general_threads_created":8,"tickets_bound":7,"tickets_with_order_conflict":0,"messages_bound_to_ticket":2,"messages_bound_to_general":57}
+```
+
+迁移只使用工单已有的 `order_id` 和 `ticket_id` 建立绑定；无法可靠判断订单的旧工单与散落消息进入“通用咨询”线程，不按时间或自然语言猜测。`tickets_with_order_conflict` 输出便于人工复核。本机演示库实测创建 2 个订单线程、8 个通用线程，绑定 7 张工单，冲突 0，重复执行为全 0。
+
+### 验收结果
+
+2026-11-15 实测：后端完整 **235 passed、0 failed、0 skipped**（含真实 PostgreSQL 随机 schema 的 15 项）；前端 **8 files、43 passed**；真实 Chromium + FastAPI + PostgreSQL **11 passed**，新增双订单用例验证“打开订单 A 写入消息 → 切到订单 B 无 A 的消息 → 刷新恢复 B 线程 → 再切回 A 仍有 A 的消息”；`ruff check backend scripts tests`、ESLint、TypeScript 与生产构建通过；E2E 随机 schema 残留 **0**；外部 LLM 调用 **0**。详见 [阶段 4.5D 报告](docs/PHASE4_5D_REPORT.md)。

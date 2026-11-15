@@ -1,4 +1,5 @@
 import type { Order } from '../api/types'
+import { productName } from '../utils/productLocale'
 import { StateNotice } from './StateNotice'
 
 interface OrdersPanelProps {
@@ -9,6 +10,7 @@ interface OrdersPanelProps {
   errorMessage?: string
   detailErrorMessage?: string
   onSelect: (orderId: string) => void
+  onContactSupport: (orderId: string) => void
 }
 
 function total(order: Order): number {
@@ -33,6 +35,7 @@ export function OrdersPanel({
   errorMessage,
   detailErrorMessage,
   onSelect,
+  onContactSupport,
 }: OrdersPanelProps) {
   return (
     <section className="orders-panel" aria-labelledby="orders-title">
@@ -51,20 +54,27 @@ export function OrdersPanel({
       {orders && orders.length > 0 ? (
         <div className="order-list">
           {orders.map((order) => (
-            <button
+            <article
               className={`order-card ${selectedOrder?.order_id === order.order_id ? 'is-selected' : ''}`}
               key={order.order_id}
-              type="button"
-              onClick={() => onSelect(order.order_id)}
             >
-              <span>
-                <strong>{order.order_id}</strong>
-                <small>{order.items.length} 件商品 · ¥{total(order).toFixed(2)}</small>
-              </span>
-              <span className={`status-chip status-${order.status.replaceAll(' ', '-')}`}>
-                {statusLabel(order.status)}
-              </span>
-            </button>
+              <button className="order-card-main" type="button" onClick={() => onSelect(order.order_id)}>
+                <span>
+                  <strong>{order.order_id}</strong>
+                  <small>{order.items.length} 件商品 · 金额 {total(order).toFixed(2)}</small>
+                </span>
+                <span className={`status-chip status-${order.status.replaceAll(' ', '-')}`}>
+                  {statusLabel(order.status)}
+                </span>
+              </button>
+              <button
+                className="order-support-button"
+                type="button"
+                onClick={() => onContactSupport(order.order_id)}
+              >
+                联系商家客服
+              </button>
+            </article>
           ))}
         </div>
       ) : null}
@@ -81,8 +91,8 @@ export function OrdersPanel({
           <ul>
             {selectedOrder.items.map((item) => (
               <li key={item.item_id}>
-                <span>{item.name || item.product_id}</span>
-                <span>¥{item.price.toFixed(2)}</span>
+                <span>{productName(item.name, item.product_id)}</span>
+                <span>{item.price.toFixed(2)}</span>
               </li>
             ))}
           </ul>

@@ -22,9 +22,7 @@ def configured_client(service, monkeypatch, execution=None):
 
 def verified_session(client, email="test@example.invalid"):
     sid = client.post("/api/v1/sessions").json()["session_id"]
-    verified = client.post(
-        f"/api/v1/sessions/{sid}/verify", json={"email": email}
-    )
+    verified = client.post(f"/api/v1/sessions/{sid}/verify", json={"email": email})
     assert verified.status_code == 200
     return sid
 
@@ -54,19 +52,17 @@ def test_natural_language_two_turn_cancel_and_idempotent_resume(service, monkeyp
         sid = verified_session(client)
         waiting = start_cancel(client, sid)
         request_id = waiting["request_id"]
-        assert client.get(
-            "/api/v1/orders/o", headers={"x-session-id": sid}
-        ).json()["status"] == "pending"
-
-        progress = client.get(
-            "/api/v1/multi-agent/tasks/current", headers={"x-session-id": sid}
+        assert (
+            client.get("/api/v1/orders/o", headers={"x-session-id": sid}).json()["status"]
+            == "pending"
         )
+
+        progress = client.get("/api/v1/multi-agent/tasks/current", headers={"x-session-id": sid})
         assert progress.status_code == 200
         assert progress.json()["pending_confirmation"]["request_id"] == request_id
         assert progress.json()["policy_context"]
         assert all(
-            item["source"].endswith("policy.md")
-            for item in progress.json()["policy_context"]
+            item["source"].endswith("policy.md") for item in progress.json()["policy_context"]
         )
 
         confirmed = client.post(
@@ -79,14 +75,16 @@ def test_natural_language_two_turn_cancel_and_idempotent_resume(service, monkeyp
         assert result["task_status"] == "executed"
         assert result["execution_result"]["after_status"] == "cancelled"
         assert [event["node"] for event in result["trace"]] == [
+            "content_safety",
             "confirmation",
             "execution",
             "supervisor_result",
             "terminal",
         ]
-        assert client.get(
-            "/api/v1/orders/o", headers={"x-session-id": sid}
-        ).json()["status"] == "cancelled"
+        assert (
+            client.get("/api/v1/orders/o", headers={"x-session-id": sid}).json()["status"]
+            == "cancelled"
+        )
 
         replay = client.post(
             "/api/v1/multi-agent/chat",
@@ -132,10 +130,13 @@ def test_reject_and_changed_intent_never_execute_old_request(service, monkeypatc
         )
         assert changed_order.status_code == 200
         assert changed_order.json()["task_status"] == "query_failed"
-        assert client.get(
-            f"/api/v1/multi-agent/cancel-requests/{old_id}",
-            headers={"x-session-id": sid},
-        ).json()["status"] == "superseded"
+        assert (
+            client.get(
+                f"/api/v1/multi-agent/cancel-requests/{old_id}",
+                headers={"x-session-id": sid},
+            ).json()["status"]
+            == "superseded"
+        )
 
         third = start_cancel(client, sid)
         old_id = third["request_id"]
@@ -167,9 +168,7 @@ def test_reject_and_changed_intent_never_execute_old_request(service, monkeypatc
 
 def test_expired_confirmation_and_changed_order_fail_closed(service, monkeypatch):
     now = [1_000]
-    execution = ExecutionService(
-        service.engine, confirmation_ttl_seconds=1, clock=lambda: now[0]
-    )
+    execution = ExecutionService(service.engine, confirmation_ttl_seconds=1, clock=lambda: now[0])
     client = configured_client(service, monkeypatch, execution)
     try:
         sid = verified_session(client)
@@ -183,6 +182,9 @@ def test_expired_confirmation_and_changed_order_fail_closed(service, monkeypatch
         assert expired.status_code == 200
         assert expired.json()["task_status"] == "execution_failed"
         assert expired.json()["failure_reason"] == "confirmation_expired"
+        assert expired.json()["ticket"] is None
+        assert "智能客服当前无法解决" in expired.json()["final_response"]
+        assert "如需人工客服" in expired.json()["final_response"]
         assert service.order(sid, "o")["status"] == "pending"
     finally:
         app.dependency_overrides.clear()
@@ -206,6 +208,9 @@ def test_expired_confirmation_and_changed_order_fail_closed(service, monkeypatch
         assert changed.status_code == 200
         assert changed.json()["task_status"] == "execution_failed"
         assert changed.json()["failure_reason"] == "order_changed"
+        assert changed.json()["ticket"] is None
+        assert "智能客服当前无法解决" in changed.json()["final_response"]
+        assert "如需人工客服" in changed.json()["final_response"]
         assert service.order(sid, "o")["status"] == "processed"
     finally:
         app.dependency_overrides.clear()

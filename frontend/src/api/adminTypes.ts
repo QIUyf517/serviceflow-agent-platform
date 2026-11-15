@@ -29,6 +29,7 @@ export interface TicketRecord {
   id: string
   ticket_no: string
   session_id: string
+  thread_id: string | null
   user_id: string | null
   order_id: string | null
   request_id: string | null
@@ -73,7 +74,26 @@ export interface TicketConversationMessage {
   created_at: number
 }
 
+export interface RelatedTicket {
+  id: string
+  ticket_no: string
+  order_id: string | null
+  status: TicketStatus
+  created_at: number
+}
+
 export interface TicketDetail extends TicketRecord {
+  order?: { order_id: string; status: string; item_count: number } | null
+  thread: {
+    thread_id: string
+    kind: 'order' | 'general'
+    order_id: string | null
+    status: string
+  } | null
+  related_tickets: {
+    same_order: RelatedTicket[]
+    other_orders: { total: number; items: RelatedTicket[] }
+  }
   session: {
     session_id: string
     identity_verified: boolean

@@ -5,6 +5,46 @@ export interface IdentityInput {
   zip_code?: string
 }
 
+export interface PaymentMethod {
+  id?: string
+  source: string
+  brand?: string
+  last_four?: string
+  balance?: number
+}
+
+export interface UserProfile {
+  user_id: string
+  name: { first_name: string; last_name: string }
+  address: Record<string, string>
+  email: string
+  payment_methods: Record<string, PaymentMethod>
+  orders: string[]
+}
+
+export interface ProductSummary {
+  product_id: string
+  name: string
+  min_price: number
+  max_price: number
+  available_variants: number
+  total_variants: number
+  option_names: string[]
+}
+
+export interface ProductVariant {
+  item_id: string
+  options: Record<string, string>
+  available: boolean
+  price: number
+}
+
+export interface Product {
+  product_id: string
+  name: string
+  variants: Record<string, ProductVariant>
+}
+
 export interface OrderItem {
   item_id: string
   product_id: string
@@ -25,6 +65,17 @@ export interface Order {
   fulfillments?: Fulfillment[]
   payment_history?: Array<Record<string, unknown>>
   [key: string]: unknown
+}
+
+export interface CheckoutInput {
+  items: Array<{ item_id: string; quantity: number }>
+  payment_method_id: string
+}
+
+export interface CheckoutResult {
+  order: Order
+  idempotent_replay: boolean
+  created_at: number
 }
 
 export interface TaskPlanItem {
@@ -130,12 +181,50 @@ export interface Ticket {
   ticket_no: string
   status: string
   message?: string
+  order_id?: string | null
+  thread_id?: string | null
   [key: string]: unknown
+}
+
+export interface SupportThread {
+  thread_id: string
+  kind: 'order' | 'general'
+  order_id: string | null
+  status: 'open' | 'closed'
+  created_at: number
+  updated_at: number
+}
+
+export interface ThreadMessage {
+  sequence: number
+  role: 'user' | 'assistant' | 'operator'
+  content: string
+  thread_id: string | null
+  created_at: number
 }
 
 export interface ConversationResponse {
   trace_id: string | null
   task_status: string
+  thread_id?: string
+  thread_order_id?: string | null
+  thread_kind?: 'order' | 'general' | 'session'
+  consultation_route?:
+    | 'content_blocked'
+    | 'faq_policy'
+    | 'product'
+    | 'order_logistics'
+    | 'after_sales'
+    | 'unclear'
+    | 'out_of_scope'
+    | 'evidence_insufficient'
+    | 'data_unavailable'
+    | 'human_handoff'
+  safety?: {
+    allowed: boolean
+    category: string
+    reason_code: string | null
+  }
   request_id: string | null
   pending_confirmation: PendingConfirmation | null
   resolution_proposal: ResolutionProposal | null
@@ -152,6 +241,8 @@ export interface ConversationResponse {
 
 export interface TaskProgress {
   thread_id: string
+  thread_order_id?: string | null
+  thread_kind?: 'order' | 'general' | 'session'
   task_status: string
   current_task: string | null
   task_plan: TaskPlanItem[]
@@ -174,4 +265,5 @@ export interface TicketCreateInput {
   requested_action: Record<string, unknown>
   order_id?: string
   request_id?: string
+  thread_id?: string
 }

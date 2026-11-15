@@ -70,18 +70,23 @@ export function AdminPage() {
     queryKey: ['operator', 'tickets', authVersion, filters],
     queryFn: () => operatorApi.listTickets(filters),
     enabled: authenticated,
+    refetchInterval: authenticated ? 5_000 : false,
   })
 
   const detailQuery = useQuery({
     queryKey: ['operator', 'ticket', authVersion, selectedTicketId],
     queryFn: () => operatorApi.getTicket(selectedTicketId ?? ''),
     enabled: authenticated && Boolean(selectedTicketId),
+    refetchInterval: authenticated && selectedTicketId ? 5_000 : false,
+    refetchIntervalInBackground: true,
   })
 
   const auditQuery = useQuery({
     queryKey: ['operator', 'ticket-audit', authVersion, selectedTicketId],
     queryFn: () => operatorApi.getAudit(selectedTicketId ?? ''),
     enabled: authenticated && Boolean(selectedTicketId),
+    refetchInterval: authenticated && selectedTicketId ? 5_000 : false,
+    refetchIntervalInBackground: true,
   })
 
   function refreshTicket() {
@@ -150,6 +155,13 @@ export function AdminPage() {
     onError: (error) => setActionError(adminError(error)),
   })
 
+  const replyMutation = useMutation({
+    mutationFn: (content: string) => operatorApi.replyTicket(selectedTicketId ?? '', content),
+    onMutate: () => setActionError(undefined),
+    onSuccess: refreshTicket,
+    onError: (error) => setActionError(adminError(error)),
+  })
+
   const authError = listQuery.error instanceof ApiError && listQuery.error.status === 401
     ? adminError(listQuery.error)
     : undefined
@@ -199,6 +211,7 @@ export function AdminPage() {
     approvalMutation.isPending ||
     decisionMutation.isPending ||
     executeMutation.isPending
+    || replyMutation.isPending
 
   return (
     <div className="admin-page">
@@ -206,6 +219,7 @@ export function AdminPage() {
         <div>
           <p className="status-kicker">人工接管工作区</p>
           <h1>案件先于动作。</h1>
+          <p role="status">当前列表 {listQuery.data?.total ?? 0} 张工单，自动检查新请求。</p>
         </div>
         <div>
           <p>本地演示认证，不是生产 IAM。操作员不能代客户确认，审批也不能绕过 ExecutionService。</p>
@@ -242,6 +256,7 @@ export function AdminPage() {
           onCreateApproval={() => approvalMutation.mutate()}
           onDecideApproval={(decision, reason) => decisionMutation.mutate({ decision, reason })}
           onExecute={() => executeMutation.mutate()}
+          onReply={(content) => replyMutation.mutate(content)}
         />
       </div>
     </div>

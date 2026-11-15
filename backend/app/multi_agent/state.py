@@ -125,15 +125,20 @@ _PROTECTED = frozenset(
 )
 
 
-def new_agent_state(session_id: str, *, user_id: str | None = None) -> AgentState:
+def new_agent_state(
+    session_id: str, *, user_id: str | None = None, thread_id: str | None = None
+) -> AgentState:
     """Create fresh state from a server-owned session and verified database identity.
 
     The caller must read SessionRow.user_id; a supplied user_id is never proof of identity.
+    ``thread_id`` is the server-resolved support thread that isolates one order.
     """
     if not isinstance(session_id, str) or not session_id.strip():
         raise ValueError("session_id_required")
     if user_id is not None and (not isinstance(user_id, str) or not user_id.strip()):
         raise ValueError("user_id_invalid")
+    if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
+        raise ValueError("thread_id_invalid")
     return cast(
         AgentState,
         _STATE_ADAPTER.validate_python(
@@ -141,7 +146,7 @@ def new_agent_state(session_id: str, *, user_id: str | None = None) -> AgentStat
                 "messages": [],
                 "trace_id": uuid4().hex,
                 "session_id": session_id,
-                "thread_id": session_id,
+                "thread_id": thread_id or session_id,
                 "user_id": user_id,
                 "identity_verified": user_id is not None,
                 "intent": None,
@@ -188,23 +193,25 @@ def restore_agent_state(
     *,
     user_id: str | None,
     messages: list[AnyMessage] | None = None,
+    thread_id: str | None = None,
 ) -> AgentState:
     """Rebuild a full state from a checkpoint while rebinding server identity.
 
     Untracked values are intentionally absent from PostgreSQL checkpoints and are
     supplied from normalized messages or recomputed from authoritative services.
     """
+    expected_thread = thread_id or session_id
     checkpoint_session = values.get("session_id")
     checkpoint_thread = values.get("thread_id")
     checkpoint_user = values.get("user_id")
     if checkpoint_session not in (None, session_id) or checkpoint_thread not in (
         None,
-        session_id,
+        expected_thread,
     ):
         raise ValueError("checkpoint_session_mismatch")
     if checkpoint_user not in (None, user_id):
         raise ValueError("checkpoint_identity_mismatch")
-    candidate = new_agent_state(session_id, user_id=user_id)
+    candidate = new_agent_state(session_id, user_id=user_id, thread_id=expected_thread)
     for key, value in values.items():
         if key in candidate and key not in {
             "session_id",
@@ -214,7 +221,7 @@ def restore_agent_state(
         }:
             candidate[key] = deepcopy(value)
     candidate["session_id"] = session_id
-    candidate["thread_id"] = session_id
+    candidate["thread_id"] = expected_thread
     candidate["user_id"] = user_id
     candidate["identity_verified"] = user_id is not None
     if "messages" not in values:

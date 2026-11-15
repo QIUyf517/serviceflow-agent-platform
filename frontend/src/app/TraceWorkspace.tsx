@@ -13,6 +13,10 @@ export function TraceWorkspaceProvider({ children }: { children: ReactNode }) {
       setLatest(response)
       setCapturedAt(Date.now())
     },
+    clear: () => {
+      setLatest(null)
+      setCapturedAt(null)
+    },
   }), [latest, capturedAt])
 
   return <TraceWorkspaceContext.Provider value={value}>{children}</TraceWorkspaceContext.Provider>

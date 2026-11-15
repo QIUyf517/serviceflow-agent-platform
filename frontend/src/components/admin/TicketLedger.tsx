@@ -122,7 +122,7 @@ export function TicketLedger({
         <div className="ticket-table-wrap">
           <table className="ticket-table">
             <thead>
-              <tr><th>工单</th><th>状态</th><th>级别</th><th>客服</th><th>创建时间</th></tr>
+              <tr><th>工单</th><th>订单</th><th>状态</th><th>级别</th><th>客服</th><th>创建时间</th></tr>
             </thead>
             <tbody>
               {result.items.map((ticket) => (
@@ -132,6 +132,11 @@ export function TicketLedger({
                       <strong>{ticket.ticket_no}</strong>
                       <small>{CATEGORY_LABELS[ticket.category]}</small>
                     </button>
+                  </td>
+                  <td>
+                    <span className="order-reference">
+                      {ticket.order_id ? `订单 ${ticket.order_id}` : '通用咨询'}
+                    </span>
                   </td>
                   <td><Tag kind={`status-${ticket.status}`}>{STATUS_LABELS[ticket.status]}</Tag></td>
                   <td>
