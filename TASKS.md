@@ -298,11 +298,15 @@ Compose 已编排 PostgreSQL、FastAPI 与 React/Nginx，三项服务均有健�
 
 ### 阶段 4.5 收尾验收（独立一轮）
 
-- [ ] 浏览器全流程人工演示：FAQ → 商品咨询 → 本人订单 → 取消或退货 → 状态同步 → 工单提醒 → 人工回复；每段核对真实 API 与数据库结果。
-- [ ] 覆盖异常用例：含“中午回答”的含糊输入、超范围请求、内容拦截、证据不足、身份隔离、未确认零写入、重复确认和人工审批边界；断言顾客回复不含英文技术提示。
-- [ ] 运行后端 pytest/ruff、前端 lint/typecheck/test/build，以及连接真实 FastAPI + PostgreSQL 的 Chromium 关键场景；记录 passed/failed/skipped，更新 README、演示说明和阶段报告。
+- [x] 浏览器全流程人工演示：FAQ → 商品咨询 → 本人订单 → 取消或退货 → 状态同步 → 工单提醒 → 人工回复；每段核对真实 API 与数据库结果。
+- [x] 覆盖异常用例：含“中午回答”的含糊输入、超范围请求、内容拦截、证据不足、身份隔离、未确认零写入、重复确认和人工审批边界；断言顾客回复不含英文技术提示。
+- [x] 运行后端 pytest/ruff、前端 lint/typecheck/test/build，以及连接真实 FastAPI + PostgreSQL 的 Chromium 关键场景；记录 passed/failed/skipped，更新 README、演示说明和阶段报告。
 
 **阶段 4.5 验收门槛：** 顾客在模拟商店完成咨询和一项售后操作，商家后台可处理对应人工工单；两端数据一致、顾客回复为中文，安全边界与自动化测试通过。完成前保持上述任务未勾选。
+
+#### 阶段 4.5 最终验收记录（2026-11-15）
+
+用户已按收尾清单完成人工浏览器复核并确认全部通过。随后使用本地真实 PostgreSQL 演示数据库独立重跑：后端 **235 passed、0 failed、0 skipped**，Ruff 通过；前端 **8 files、43 passed**，ESLint、TypeScript 与生产构建通过；真实 Chromium + FastAPI + PostgreSQL 端到端测试 **11 passed**，随机 schema 已清理且残留 **0**；外部 LLM 调用 **0**。阶段 4.5 达到验收门槛并正式完成，阶段 5 尚未开始。详见 `docs/PHASE4_5_ACCEPTANCE_REPORT.md`。
 
 ## 阶段 5：评测与求职交付
 

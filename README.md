@@ -1,6 +1,6 @@
 # ServiceFlow — 可信多 Agent 智能售后平台
 
-> 状态：阶段 4.5C 已完成，并已修复同顾客不同订单的会话串话（4.5D 订单独立会话线程）。模拟商店客服支持内容安全先检、政策/商品/订单/售后分流、多轮追问、按订单恢复会话和人工回复。阶段 4.5 收尾的人工浏览器复核和阶段 5 尚未开始。
+> 状态：阶段 4.5 已于 2026-11-15 通过最终验收。模拟商店客服已支持内容安全先检、政策/商品/订单/售后分流、多轮追问、按订单隔离并恢复会话，以及顾客与人工客服双向回复。阶段 5 尚未开始。
 
 ## 项目定位
 
@@ -29,6 +29,7 @@
 - [docs/PHASE4_5B_REPORT.md](docs/PHASE4_5B_REPORT.md)：阶段 4.5B 内容安全、咨询分流、售后闭环与真实浏览器验收。
 - [docs/PHASE4_5C_REPORT.md](docs/PHASE4_5C_REPORT.md)：阶段 4.5C 中文体验、双向人工会话与后台聊天窗口。
 - [docs/PHASE4_5D_REPORT.md](docs/PHASE4_5D_REPORT.md)：阶段 4.5D 订单独立会话线程、串话修复与旧库迁移。
+- [docs/PHASE4_5_ACCEPTANCE_REPORT.md](docs/PHASE4_5_ACCEPTANCE_REPORT.md)：阶段 4.5 最终人工与自动化验收记录。
 - [docs/DATA_AND_RAG.md](docs/DATA_AND_RAG.md)：τ-bench 下载导入、RAG、数据隔离。
 - [docs/EVALUATION.md](docs/EVALUATION.md)：基线实验、官方与扩展评测、指标。
 - [CODEX_START_HERE.md](CODEX_START_HERE.md)：第一条可以复制给 Codex 的任务提示。
@@ -421,7 +422,7 @@ PostgreSQL 的 JSON 字段使用 JSONB，显式 SQLite 测试替身使用 JSON�
 
 ### LangGraph checkpointer 与恢复语义
 
-生产/演示 PostgreSQL 使用官方 `langgraph-checkpoint-postgres` 的 `PostgresSaver` 和 psycopg 连接池，复用 `DATABASE_URL`。首次连接自动执行 checkpointer 的幂等 `setup()`；`thread_id` 只能由服务端设置为 `session_id`，API 不接受客户端 thread ID。
+生产/演示 PostgreSQL 使用官方 `langgraph-checkpoint-postgres` 的 `PostgresSaver` 和 psycopg 连接池，复用 `DATABASE_URL`。首次连接自动执行 checkpointer 的幂等 `setup()`；阶段 4.5D 起，`thread_id` 由服务端解析为订单或通用咨询对应的 `support_thread` ID，不再直接复用 `session_id`。API 只接受业务范围参数，不接受客户端指定 thread ID。
 
 ```powershell
 $env:DATABASE_URL = 'postgresql+psycopg://serviceflow:serviceflow_local@127.0.0.1:5432/serviceflow_demo'
@@ -740,7 +741,7 @@ HTTP/1.1 200
 
 取消和退货仍使用阶段 2.5B–2.6 的硬边界：具体提案 → 客户明确确认 → 执行前重读订单 → 硬规则 → 事务/幂等/审计。前端只在服务端返回 `execution_result.status=succeeded` 时刷新订单列表和当前详情，不根据自然语言“成功”字样更改界面状态。
 
-2026-11-14 最终实测：后端 **220 passed、0 failed、0 skipped**；前端 **8 files、39 passed、0 failed**；Chromium + 真实 FastAPI/PostgreSQL **8 passed、0 failed**；Ruff、ESLint、TypeScript 和生产构建均通过；E2E 随机 schema 残留 **0**；Compose 的 db/api/frontend 均 healthy；外部 LLM 调用 **0**。详见 [阶段 4.5B 报告](docs/PHASE4_5B_REPORT.md)。4.5C 和阶段 4.5 收尾尚未开始。
+2026-11-14 阶段 4.5B 当轮实测：后端 **220 passed、0 failed、0 skipped**；前端 **8 files、39 passed、0 failed**；Chromium + 真实 FastAPI/PostgreSQL **8 passed、0 failed**；Ruff、ESLint、TypeScript 和生产构建均通过；E2E 随机 schema 残留 **0**；Compose 的 db/api/frontend 均 healthy；外部 LLM 调用 **0**。详见 [阶段 4.5B 报告](docs/PHASE4_5B_REPORT.md)。这是阶段性历史记录；当前完成状态以本文顶部和阶段 4.5 最终验收报告为准。
 
 ## 阶段 4.5C：中文体验与人工接管
 
@@ -787,7 +788,7 @@ HTTP/1.1 200
 {"sequence":9,"content":"好的，请继续帮我处理。","created_at":<unix-time>,"status":"in_progress","idempotent_replay":false}
 ```
 
-2026-11-15 双向人工会话修订后实测：后端 **226 passed**，前端 **8 files、40 passed**，真实 FastAPI/PostgreSQL/Chromium **10 passed**，临时 schema 残留 **0**；Ruff、lint、typecheck、build 均通过。浏览器场景使用两个标签页验证“人工回复到达顾客 → 顾客继续回复 → 已打开的后台自动显示”，同时断言顾客后续消息不进入 Agent。详见 [阶段 4.5C 报告](docs/PHASE4_5C_REPORT.md)。阶段 4.5 收尾的人工作业仍需在更新后的页面复核后勾选。
+2026-11-15 双向人工会话修订后实测：后端 **226 passed**，前端 **8 files、40 passed**，真实 FastAPI/PostgreSQL/Chromium **10 passed**，临时 schema 残留 **0**；Ruff、lint、typecheck、build 均通过。浏览器场景使用两个标签页验证“人工回复到达顾客 → 顾客继续回复 → 已打开的后台自动显示”，同时断言顾客后续消息不进入 Agent。详见 [阶段 4.5C 报告](docs/PHASE4_5C_REPORT.md)。这是阶段性历史记录；阶段 4.5 后续已完成最终验收。
 
 刷新恢复兼容说明：旧版本从订单对话自然语言“转人工”创建的活动工单可能没有 `order_id`。阶段 4.5D 起，这类未绑定订单的工单固定归入“通用咨询”线程，不再自动挂到任意订单窗口；订单窗口只恢复与本订单线程绑定的工单。旧 LangGraph 检查点也会按当前状态模型补齐缺失通道，避免升级后因缺少 `triage_result` 返回 500。该修订验证结果为真实 PostgreSQL 后端 **227 passed**、前端 **8 files、41 passed**，静态检查与生产构建通过。
 
@@ -841,3 +842,7 @@ $env:PYTHONPATH="backend"
 ### 验收结果
 
 2026-11-15 实测：后端完整 **235 passed、0 failed、0 skipped**（含真实 PostgreSQL 随机 schema 的 15 项）；前端 **8 files、43 passed**；真实 Chromium + FastAPI + PostgreSQL **11 passed**，新增双订单用例验证“打开订单 A 写入消息 → 切到订单 B 无 A 的消息 → 刷新恢复 B 线程 → 再切回 A 仍有 A 的消息”；`ruff check backend scripts tests`、ESLint、TypeScript 与生产构建通过；E2E 随机 schema 残留 **0**；外部 LLM 调用 **0**。详见 [阶段 4.5D 报告](docs/PHASE4_5D_REPORT.md)。
+
+## 阶段 4.5 最终验收
+
+2026-11-15，用户按收尾清单完成人工浏览器复核并确认全部通过；随后再次独立运行完整后端、前端和真实浏览器测试，结果分别为 **235 passed**、**43 passed** 和 **11 passed**，所有静态检查与生产构建通过，临时数据库 schema 残留 **0**，外部 LLM 调用 **0**。阶段 4.5 正式验收完成，具体证据、边界和命令见 [阶段 4.5 最终验收报告](docs/PHASE4_5_ACCEPTANCE_REPORT.md)。
