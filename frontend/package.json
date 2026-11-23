@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest",
-    "test:e2e": "node e2e/run-e2e.mjs"
+    "test:e2e": "node e2e/run-e2e.mjs",
+    "capture:portfolio": "node scripts/capture-portfolio.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
