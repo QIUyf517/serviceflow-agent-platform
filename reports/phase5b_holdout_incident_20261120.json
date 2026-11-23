@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "occurred_at": "2026-11-20T13:49:43+08:00",
+  "architecture": "single_agent",
+  "original_run_id": "phase5b-final",
+  "status": "checkpoint_corrupted_after_first_task",
+  "cause": "tau2 checkpoint expansion used the Windows GBK default encoding and failed on a Unicode symbol",
+  "exception": "UnicodeEncodeError: 'gbk' codec can't encode character U+2212",
+  "observed_results": [
+    {
+      "task_id": "5",
+      "trial": 0,
+      "reward": 1.0,
+      "termination_reason": "user_stop"
+    },
+    {
+      "task_id": "5",
+      "trial": 1,
+      "reward": 0.0,
+      "termination_reason": "max_steps"
+    },
+    {
+      "task_id": "5",
+      "trial": 2,
+      "reward": 1.0,
+      "termination_reason": "user_stop"
+    }
+  ],
+  "observed_successes": 2,
+  "observed_runs": 3,
+  "raw_checkpoint": {
+    "path": "vendor/tau2-bench/data/simulations/serviceflow-phase5b-holdout-single_agent-phase5b-final/results.json",
+    "bytes_after_failure": 0,
+    "recoverable": false
+  },
+  "integrity_decision": {
+    "rerun_observed_task": false,
+    "remaining_task_count": 39,
+    "remaining_simulations": 117,
+    "merge_observed_rewards_into_final_score": true,
+    "full_trace_and_token_usage_available_for_observed_runs": false
+  },
+  "external_cost_usd": null,
+  "notes": [
+    "The task outcomes were printed before checkpoint corruption and are retained without resampling.",
+    "The final report must disclose that three single-agent runs lack recoverable traces and exact usage."
+  ]
+}

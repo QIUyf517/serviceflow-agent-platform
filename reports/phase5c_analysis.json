@@ -1,0 +1,216 @@
+{
+  "schema_version": "1.0",
+  "phase": "5C",
+  "generated_from_frozen_results": true,
+  "official_score_eligible": false,
+  "sources": [
+    {
+      "path": "reports/results.csv",
+      "sha256": "233cb3bffb3e3cbf51a2228e03f1255669dbbcaf487f0765c821d7ea6b28ed6b"
+    },
+    {
+      "path": "reports/phase5b_v3_development_comparison.json",
+      "sha256": "690740c8c9ea8e6aa942d7d05736fd8347ef4b841763984eec3bc4d67d5346d2"
+    },
+    {
+      "path": "reports/phase5b_holdout_comparison.json",
+      "sha256": "55d075553ec719670381eb8f8e2406312a7c1d8ac1f29517d72d4926e6ea2ca0"
+    },
+    {
+      "path": "reports/phase5b_reliability_summary.json",
+      "sha256": "66441812521395f7ec4df5680566b32d54253fef49ca46b52dc5445191367444"
+    },
+    {
+      "path": "reports/raw/official_tasks_custom_judge/phase5/holdout/phase5b-final-single-remainder/single_agent_results.json",
+      "sha256": "6d48a0fd32c49c19027ca7a25720b133dac92cf9d849acf330ef7a7af307b570"
+    },
+    {
+      "path": "reports/raw/official_tasks_custom_judge/phase5/holdout/phase5b-final-multi/multi_agent_results.json",
+      "sha256": "9efaa9c0589b47905945dd06c4caa2ce11be58246a32a4dbf440821055e853de"
+    }
+  ],
+  "official_holdout": {
+    "single_agent": {
+      "architecture": "single_agent",
+      "run_id": "phase5b-final-single-remainder",
+      "runs": 120,
+      "successes": 51,
+      "failures": 69,
+      "success_rate": 0.425,
+      "duration_coverage": 120,
+      "latency_p50_seconds": 27.210465500000282,
+      "latency_p95_seconds": 37.79045699999784,
+      "tool_call_coverage": 117,
+      "total_tool_calls": 649,
+      "mean_tool_calls_per_covered_run": 5.547008547008547,
+      "token_coverage": 117,
+      "tracked_total_tokens": 8874001,
+      "cost_coverage": 117,
+      "tracked_cost_usd": 0.891734748,
+      "excluded_costs": [
+        "3 runs have no persisted token or cost usage",
+        "semantic Judge calls are not included",
+        "failed requests without persisted usage are not included"
+      ]
+    },
+    "multi_agent_v3": {
+      "architecture": "multi_agent",
+      "run_id": "phase5b-final-multi",
+      "runs": 120,
+      "successes": 45,
+      "failures": 75,
+      "success_rate": 0.375,
+      "duration_coverage": 120,
+      "latency_p50_seconds": 27.84458464999625,
+      "latency_p95_seconds": 40.48406448000605,
+      "tool_call_coverage": 120,
+      "total_tool_calls": 656,
+      "mean_tool_calls_per_covered_run": 5.466666666666667,
+      "token_coverage": 120,
+      "tracked_total_tokens": 8255739,
+      "cost_coverage": 120,
+      "tracked_cost_usd": 0.906761442,
+      "excluded_costs": [
+        "semantic Judge calls are not included",
+        "failed requests without persisted usage are not included"
+      ]
+    }
+  },
+  "paired_comparison": {
+    "pairs": 120,
+    "both_success": 39,
+    "single_only_success": 12,
+    "multi_only_success": 6,
+    "both_fail": 63,
+    "multi_minus_single_percentage_points": -5.0,
+    "approximate_paired_95_percent_ci_percentage_points": [
+      -11.900468867275274,
+      1.9004688672752734
+    ],
+    "mcnemar_exact_two_sided_p": 0.237884521484375
+  },
+  "comparable_usage": {
+    "excluded_case_ids": [
+      "5"
+    ],
+    "reason": "The single-agent checkpoint for case 5 lost three token and cost records; both arms exclude that case for a like-for-like usage comparison.",
+    "runs_per_architecture": 117,
+    "single_agent_tokens_per_run": 75846.16239316239,
+    "multi_agent_tokens_per_run": 67906.89743589744,
+    "multi_minus_single_tokens_per_run_percent": -10.467589534867072,
+    "single_agent_cost_per_run_usd": 0.007621664512820513,
+    "multi_agent_cost_per_run_usd": 0.007484729794871794,
+    "multi_minus_single_cost_per_run_percent": -1.796651082166878
+  },
+  "development_rates": {
+    "single_agent": 0.7333333333333333,
+    "multi_agent_v3": 0.8
+  },
+  "development_to_holdout_change_percentage_points": {
+    "single_agent": -30.83333333333333,
+    "multi_agent_v3": -42.50000000000001
+  },
+  "reliability": {
+    "scenario_count": 10,
+    "passed": 10,
+    "failed": 0,
+    "trials_per_scenario": 1,
+    "external_llm_calls": 0,
+    "tracked_cost_usd": 0.0,
+    "recovery_scenario_id": "REL-008",
+    "recovery_scenario_passed": true,
+    "zero_count_metrics": {
+      "unauthorized_disclosure_count": 0,
+      "unconfirmed_write_count": 0,
+      "duplicate_write_count": 0,
+      "policy_violation_count": 0,
+      "binding_violation_count": 0,
+      "stale_write_count": 0,
+      "unsupported_write_count": 0,
+      "prompt_injection_success_count": 0
+    }
+  },
+  "evidence_arms": [
+    {
+      "arm": "rules",
+      "evidence": "ServiceFlow 确定性政策与安全路径（自建可靠性轨道）",
+      "sample": "10 个自建场景，每场景执行 1 次 pytest",
+      "result": "10/10 通过；已断言的违规计数均为 0",
+      "directly_comparable_on_official_holdout": false,
+      "limitation": "不是隔离的官方任务端到端实验臂，且没有重复运行。"
+    },
+    {
+      "arm": "single_agent",
+      "evidence": "冻结的 τ-bench Retail test 任务 + DeepSeek 自定义语义 Judge",
+      "sample": "40 项任务 × 3 次 = 120 次配对运行",
+      "result": "51/120 (42.50%)",
+      "directly_comparable_on_official_holdout": true,
+      "limitation": "自定义 Judge 结果不是官方默认 τ-bench 分数。"
+    },
+    {
+      "arm": "multi_agent",
+      "evidence": "冻结的 V3 确定性 Supervisor + 专业角色",
+      "sample": "40 项任务 × 3 次 = 120 次配对运行",
+      "result": "45/120 (37.50%)",
+      "directly_comparable_on_official_holdout": true,
+      "limitation": "V3 的产品边界是一笔订单一个线程。"
+    },
+    {
+      "arm": "multi_agent_recovery",
+      "evidence": "REL-008 超时归一化与幂等重试断言",
+      "sample": "1 个自建恢复场景 × 1 次执行",
+      "result": "1/1 通过",
+      "directly_comparable_on_official_holdout": false,
+      "limitation": "没有执行完整的恢复增强官方任务实验臂。"
+    }
+  ],
+  "failures": {
+    "single_agent": {
+      "architecture": "single_agent",
+      "failures": 69,
+      "termination_reason_counts": {
+        "max_steps": 19,
+        "trace_unavailable_checkpoint_loss": 1,
+        "user_stop": 49
+      },
+      "action_outcome_counts": {
+        "communication_or_read_only_failure": 1,
+        "different_effect_executed": 3,
+        "required_effect_executed_but_score_failed": 27,
+        "required_effect_not_executed": 37,
+        "trace_unavailable_checkpoint_loss": 1
+      },
+      "raw_trace_failures_classified": 68,
+      "raw_trace_failures_unavailable": 1
+    },
+    "multi_agent_v3": {
+      "architecture": "multi_agent",
+      "failures": 75,
+      "termination_reason_counts": {
+        "max_steps": 18,
+        "user_stop": 57
+      },
+      "action_outcome_counts": {
+        "communication_or_read_only_failure": 1,
+        "different_effect_executed": 10,
+        "required_effect_executed_but_score_failed": 22,
+        "required_effect_not_executed": 42
+      },
+      "raw_trace_failures_classified": 75,
+      "raw_trace_failures_unavailable": 0
+    }
+  },
+  "conclusions": [
+    "Multi-agent V3 did not demonstrate superiority on the frozen holdout.",
+    "The observed -5.0 percentage-point difference is not statistically decisive at 0.05.",
+    "The development advantage reversed on holdout, so the development score did not generalize.",
+    "The reliability track supports specific safety invariants, not a general 100% reliability claim."
+  ],
+  "limitations": [
+    "Only the single-agent and multi-agent V3 arms are directly comparable on official tasks.",
+    "The semantic Judge uses DeepSeek instead of the upstream default OpenAI model.",
+    "The reliability track has one execution per authored scenario and no external LLM calls.",
+    "Three single-agent case-5 token/cost traces were lost in a checkpoint incident.",
+    "Tracked costs exclude semantic Judge calls and some failed requests."
+  ]
+}

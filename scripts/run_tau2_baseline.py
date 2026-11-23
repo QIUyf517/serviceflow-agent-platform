@@ -108,10 +108,38 @@ def build_plan(phase: str, settings: Settings) -> dict[str, Any]:
 
 
 def summarize(results: Any, plan: dict[str, Any]) -> dict[str, Any]:
+    rates = plan.get("pricing", {}).get("rates_usd_per_million")
+
+    def estimated_cost(usage: dict[str, int]) -> float | None:
+        output_tokens = usage.get("completion_tokens")
+        if rates and output_tokens is not None:
+            cache_hit = usage.get("prompt_cache_hit_tokens", 0)
+            cache_miss = usage.get("prompt_cache_miss_tokens")
+            if cache_miss is None:
+                cache_miss = usage.get("prompt_tokens", 0) - cache_hit
+            return (
+                cache_hit * rates["cache_hit_input"]
+                + cache_miss * rates["cache_miss_input"]
+                + output_tokens * rates["output"]
+            ) / 1_000_000
+        input_tokens = usage.get("prompt_tokens")
+        if (
+            input_tokens is not None
+            and output_tokens is not None
+            and plan["agent_input_usd_per_million"] is not None
+            and plan["agent_output_usd_per_million"] is not None
+        ):
+            return (
+                input_tokens * plan["agent_input_usd_per_million"]
+                + output_tokens * plan["agent_output_usd_per_million"]
+            ) / 1_000_000
+        return None
+
     simulations = results.simulations
     rows = []
     for sim in simulations:
         usage: dict[str, int] = {}
+        user_usage: dict[str, int] = {}
         tool_calls = 0
         guard_rejections = 0
         tool_errors = 0
@@ -124,6 +152,10 @@ def summarize(results: Any, plan: dict[str, Any]) -> dict[str, Any]:
                 for key, value in (getattr(message, "usage", None) or {}).items():
                     if isinstance(value, int):
                         usage[key] = usage.get(key, 0) + value
+            elif getattr(message, "role", None) == "user":
+                for key, value in (getattr(message, "usage", None) or {}).items():
+                    if isinstance(value, int):
+                        user_usage[key] = user_usage.get(key, 0) + value
             elif getattr(message, "role", None) == "tool":
                 tool_errors += int(bool(getattr(message, "error", False)))
         reward = sim.reward_info.reward if sim.reward_info else None
@@ -138,8 +170,11 @@ def summarize(results: Any, plan: dict[str, Any]) -> dict[str, Any]:
                 "duration_seconds": sim.duration,
                 "tool_calls": tool_calls,
                 "token_usage": usage or None,
+                "user_token_usage": user_usage or None,
                 "agent_cost_usd": sim.agent_cost,
                 "user_cost_usd": sim.user_cost,
+                "estimated_agent_cost_usd": estimated_cost(usage),
+                "estimated_user_cost_usd": estimated_cost(user_usage),
                 "guard_rejections": guard_rejections,
                 "tool_errors": tool_errors,
                 "failure_type": None if reward == 1 else str(sim.termination_reason),
@@ -149,29 +184,14 @@ def summarize(results: Any, plan: dict[str, Any]) -> dict[str, Any]:
     durations = sorted(row["duration_seconds"] for row in rows)
     successes = [row["success"] for row in rows if row["success"] is not None]
     totals: dict[str, int] = {}
+    user_totals: dict[str, int] = {}
     for row in rows:
         for key, value in (row["token_usage"] or {}).items():
             totals[key] = totals.get(key, 0) + value
-    input_tokens = totals.get("prompt_tokens")
-    output_tokens = totals.get("completion_tokens")
-    cost = None
-    if (
-        input_tokens is not None
-        and output_tokens is not None
-        and plan["agent_input_usd_per_million"] is not None
-        and plan["agent_output_usd_per_million"] is not None
-    ):
-        cost = (
-            input_tokens * plan["agent_input_usd_per_million"]
-            + output_tokens * plan["agent_output_usd_per_million"]
-        ) / 1_000_000
-    elif plan.get("pricing", {}).get("rates_usd_per_million") and output_tokens is not None:
-        rates = plan["pricing"]["rates_usd_per_million"]
-        cost = (
-            totals.get("prompt_cache_hit_tokens", 0) * rates["cache_hit_input"]
-            + totals.get("prompt_cache_miss_tokens", 0) * rates["cache_miss_input"]
-            + output_tokens * rates["output"]
-        ) / 1_000_000
+        for key, value in (row["user_token_usage"] or {}).items():
+            user_totals[key] = user_totals.get(key, 0) + value
+    cost = estimated_cost(totals)
+    estimated_user_cost = estimated_cost(user_totals)
     user_cost = sum(row["user_cost_usd"] or 0 for row in rows)
     return {
         "evaluation": "official_tau2",
@@ -184,9 +204,15 @@ def summarize(results: Any, plan: dict[str, Any]) -> dict[str, Any]:
         else None,
         "total_tool_calls": sum(row["tool_calls"] for row in rows),
         "token_usage": totals or None,
+        "user_simulator_token_usage": user_totals or None,
         "estimated_agent_cost_usd": cost,
         "reported_user_simulator_cost_usd": user_cost,
-        "estimated_total_cost_usd": cost + user_cost if cost is not None else None,
+        "estimated_user_simulator_cost_usd": estimated_user_cost,
+        "estimated_total_cost_usd": (
+            cost + estimated_user_cost
+            if cost is not None and estimated_user_cost is not None
+            else None
+        ),
         "pricing": plan.get("pricing"),
         "guard_rejections": sum(row["guard_rejections"] for row in rows),
         "business_violations": None,

@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from tau2.agent.base_agent import HalfDuplexAgent, ValidAgentInputMessage
 from tau2.data_model.message import (
@@ -46,12 +46,53 @@ def _is_confirmation(value: str) -> bool:
 
 
 @dataclass
+class TauWorkflow:
+    """Server-owned write workflow state; never inferred from policy text."""
+
+    intent: str | None = None
+    stage: Literal[
+        "idle",
+        "gathering",
+        "awaiting_confirmation",
+        "executing",
+        "post_execution",
+        "blocked",
+    ] = "idle"
+    order_id: str | None = None
+    proposal_name: str | None = None
+    proposal_arguments: dict[str, Any] | None = None
+    proposal_fingerprint: str | None = None
+    completed_writes: int = 0
+
+    @property
+    def active(self) -> bool:
+        return self.intent is not None and self.stage != "idle"
+
+    def clear_proposal(self) -> None:
+        self.order_id = None
+        self.proposal_name = None
+        self.proposal_arguments = None
+        self.proposal_fingerprint = None
+
+    def clear(self) -> None:
+        self.intent = None
+        self.stage = "idle"
+        self.completed_writes = 0
+        self.clear_proposal()
+
+
+@dataclass
 class TauState:
     messages: list[Message] = field(default_factory=list)
     verified_user_id: str | None = None
     own_order_ids: set[str] = field(default_factory=set)
     pending_write: ModelToolCall | None = None
     last_tool_name: str | None = None
+    profile_loaded: bool = False
+    tool_calls_used: int = 0
+    total_tokens_used: int = 0
+    route_history: list[str] = field(default_factory=list)
+    workflow: TauWorkflow = field(default_factory=TauWorkflow)
 
 
 def _as_chat(messages: list[Message], policy: str) -> list[dict[str, Any]]:
@@ -97,17 +138,32 @@ def _as_chat(messages: list[Message], policy: str) -> list[dict[str, Any]]:
 
 
 class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
-    def __init__(self, tools: list[Tool], domain_policy: str, provider: ModelProvider) -> None:
+    def __init__(
+        self,
+        tools: list[Tool],
+        domain_policy: str,
+        provider: ModelProvider,
+        *,
+        max_tool_calls: int = 6,
+        max_total_tokens: int = 120_000,
+    ) -> None:
         super().__init__(tools=tools, domain_policy=domain_policy)
+        if max_tool_calls < 1 or max_total_tokens < 1:
+            raise ValueError("evaluation_budget_invalid")
         self.provider = provider
         self.tool_map = {tool.name: tool for tool in tools}
+        self.max_tool_calls = max_tool_calls
+        self.max_total_tokens = max_total_tokens
 
     def get_init_state(self, message_history: list[Message] | None = None) -> TauState:
         state = TauState()
         for message in message_history or []:
             state.messages.append(message)
-            if isinstance(message, AssistantMessage) and message.tool_calls:
-                state.last_tool_name = message.tool_calls[0].name
+            if isinstance(message, AssistantMessage):
+                if message.tool_calls:
+                    state.last_tool_name = message.tool_calls[0].name
+                    state.tool_calls_used += len(message.tool_calls)
+                self._record_usage(state, message.usage)
             elif isinstance(message, ToolMessage):
                 self._consume_tool(state, message)
         return state
@@ -122,6 +178,7 @@ class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
             if identity and not identity.startswith("Error"):
                 state.verified_user_id = identity
         elif state.last_tool_name == "get_user_details":
+            state.profile_loaded = True
             try:
                 profile = json.loads(message.content or "{}")
                 if profile.get("user_id") == state.verified_user_id:
@@ -129,6 +186,34 @@ class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
             except (ValueError, TypeError, AttributeError):
                 pass
         state.last_tool_name = None
+
+    @staticmethod
+    def _record_usage(state: TauState, usage: dict[str, int] | None) -> bool:
+        usage = usage or {}
+        total = usage.get("total_tokens")
+        if total is None:
+            total = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+        state.total_tokens_used += int(total or 0)
+        return True
+
+    def _budget_rejection(self, state: TauState) -> AssistantMessage | None:
+        if state.tool_calls_used < self.max_tool_calls:
+            return None
+        return AssistantMessage.text(
+            "I cannot safely make another tool call within this task's fixed budget.",
+            raw_data={"budget_rejection": "tool_call_budget_exhausted"},
+        )
+
+    def _emit_tool_call(self, state: TauState, call: ModelToolCall) -> AssistantMessage:
+        rejection = self._budget_rejection(state)
+        if rejection is not None:
+            return rejection
+        state.tool_calls_used += 1
+        state.last_tool_name = call.name
+        return AssistantMessage.text(
+            "",
+            tool_calls=[ToolCall(id=call.id, name=call.name, arguments=call.arguments)],
+        )
 
     def _guard(self, state: TauState, call: ModelToolCall) -> str | None:
         if call.name not in self.tool_map:
@@ -186,11 +271,7 @@ class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
                 if rejection:
                     response = AssistantMessage.text(rejection)
                 else:
-                    response = AssistantMessage.text(
-                        "",
-                        tool_calls=[ToolCall(id=call.id, name=call.name, arguments=call.arguments)],
-                    )
-                    state.last_tool_name = call.name
+                    response = self._emit_tool_call(state, call)
                 state.messages.append(response)
                 return response, state
             if isinstance(message, UserMessage):
@@ -203,7 +284,15 @@ class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
         started = perf_counter()
         reply = self.provider.complete(_as_chat(state.messages, self.domain_policy), allowed)
         elapsed = perf_counter() - started
-        if len(reply.tool_calls) > 1:
+        self._record_usage(state, reply.usage)
+        if state.total_tokens_used > self.max_total_tokens:
+            response = AssistantMessage.text(
+                "I cannot safely continue because this task reached its fixed token budget.",
+                usage=reply.usage,
+                generation_time_seconds=elapsed,
+                raw_data={"budget_rejection": "token_budget_exhausted"},
+            )
+        elif len(reply.tool_calls) > 1:
             response = AssistantMessage.text(
                 "I can use only one tool at a time.",
                 usage=reply.usage,
@@ -228,13 +317,18 @@ class ServiceFlowTauAgent(HalfDuplexAgent[TauState]):
                     generation_time_seconds=elapsed,
                 )
             else:
-                response = AssistantMessage.text(
-                    "",
-                    tool_calls=[ToolCall(id=call.id, name=call.name, arguments=call.arguments)],
-                    usage=reply.usage,
-                    generation_time_seconds=elapsed,
-                )
-                state.last_tool_name = call.name
+                budget_rejection = self._budget_rejection(state)
+                if budget_rejection is not None:
+                    response = budget_rejection
+                else:
+                    state.tool_calls_used += 1
+                    state.last_tool_name = call.name
+                    response = AssistantMessage.text(
+                        "",
+                        tool_calls=[ToolCall(id=call.id, name=call.name, arguments=call.arguments)],
+                        usage=reply.usage,
+                        generation_time_seconds=elapsed,
+                    )
         else:
             response = AssistantMessage.text(
                 reply.content or "", usage=reply.usage, generation_time_seconds=elapsed
@@ -249,4 +343,10 @@ def create_serviceflow_tau_agent(
     # Deliberately ignore task and evaluation criteria passed by the registry.
     settings = Settings()
     settings = settings.model_copy(update={"agent_model": kwargs.get("llm", settings.agent_model)})
-    return ServiceFlowTauAgent(tools, domain_policy, OpenAICompatibleProvider(settings))
+    return ServiceFlowTauAgent(
+        tools,
+        domain_policy,
+        OpenAICompatibleProvider(settings),
+        max_tool_calls=settings.agent_max_tool_calls,
+        max_total_tokens=settings.agent_max_total_tokens,
+    )

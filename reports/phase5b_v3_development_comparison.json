@@ -1,0 +1,166 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "split": "development",
+  "track": "tau2_retail_official_tasks_custom_deepseek_judge",
+  "official_score_eligible": false,
+  "task_count": 10,
+  "trials_per_task": 3,
+  "single_agent_v1": {
+    "run_id": "phase5b-initial",
+    "successes": 22,
+    "runs": 30,
+    "success_rate": 0.7333333333333333,
+    "average_latency_seconds": 25.529981690001055,
+    "p95_latency_seconds": 36.32387059999746,
+    "tool_calls": 161,
+    "guard_rejections": 22,
+    "estimated_cost_usd": 0.236454708
+  },
+  "multi_agent_v1": {
+    "run_id": "phase5b-initial",
+    "successes": 8,
+    "runs": 30,
+    "success_rate": 0.26666666666666666,
+    "guard_rejections": 47,
+    "confirmed_then_wrong_role_failures": 7,
+    "estimated_cost_usd": 0.26921050799999996
+  },
+  "multi_agent_v2": {
+    "run_id": "phase5b-v2",
+    "successes": 15,
+    "runs": 30,
+    "success_rate": 0.5,
+    "average_latency_seconds": 26.632014500000516,
+    "p95_latency_seconds": 36.34633850000682,
+    "tool_calls": 171,
+    "guard_rejections": 38,
+    "user_stop_failures": 10,
+    "max_steps_failures": 5,
+    "confirmed_then_wrong_role_failures": 5,
+    "estimated_cost_usd": 0.26558477399999997
+  },
+  "multi_agent_v3": {
+    "run_id": "phase5b-v3",
+    "prompt_version": "tau2-deterministic-supervisor-specialists-v3",
+    "adapter_sha256": "fd41dc31514e688c46129713519fe2a7387c099ab4d09de33347997b505923ab",
+    "successes": 24,
+    "failures": 6,
+    "runs": 30,
+    "success_rate": 0.8,
+    "pass_at_1": 0.8,
+    "pass_at_2": 0.7,
+    "pass_at_3": 0.6,
+    "successes_by_trial": [
+      9,
+      6,
+      9
+    ],
+    "average_latency_seconds": 23.768953056666458,
+    "p95_latency_seconds": 32.43390619999991,
+    "tool_calls": 168,
+    "guard_rejections": 0,
+    "user_stop_failures": 6,
+    "max_steps_failures": 0,
+    "read_actions": {
+      "correct": 127,
+      "total": 135,
+      "rate": 0.9407407407407408
+    },
+    "write_actions": {
+      "correct": 27,
+      "total": 33,
+      "rate": 0.8181818181818182
+    },
+    "confirmed_then_wrong_role_failures": 0,
+    "per_task_success_rate": {
+      "0": 1.0,
+      "1": 1.0,
+      "6": 0.6666666666666666,
+      "7": 1.0,
+      "8": 1.0,
+      "10": 1.0,
+      "11": 0.0,
+      "13": 1.0,
+      "14": 0.6666666666666666,
+      "15": 0.6666666666666666
+    },
+    "token_usage": {
+      "agent_prompt": 2222237,
+      "agent_completion": 43312,
+      "agent_total": 2265549,
+      "agent_prompt_cache_hit": 2076139,
+      "agent_prompt_cache_miss": 146098,
+      "user_simulator_prompt": 378607,
+      "user_simulator_completion": 6307
+    },
+    "estimated_agent_cost_usd": 0.10826063400000001,
+    "estimated_user_simulator_cost_usd": 0.12115049999999998,
+    "estimated_total_cost_usd": 0.229411134
+  },
+  "comparison": {
+    "v3_minus_v2_successes": 9,
+    "v3_minus_v2_success_rate": 0.3,
+    "v3_minus_single_successes": 2,
+    "v3_minus_single_success_rate": 0.06666666666666667,
+    "v3_minus_v2_guard_rejections": -38,
+    "v3_minus_v2_confirmed_then_wrong_role_failures": -5,
+    "v3_minus_v2_average_latency_seconds": -2.863061443334058,
+    "v3_minus_single_average_latency_seconds": -1.761028633334597,
+    "conclusion": "V3 materially improves the same-model development result and exceeds the unchanged single-agent baseline on this 30-run sample. It is frozen for the product-defined single-order-thread scope; the full 24/30 result and all cross-order failures remain reported."
+  },
+  "failure_audit": {
+    "failed_runs": 6,
+    "cross_order_out_of_product_scope": {
+      "task_id": "11",
+      "failed_trials": 3,
+      "description": "The benchmark requests returns for two orders in one conversation. The product requires one independent thread per order and does not support this batch operation."
+    },
+    "other_failed_runs": [
+      {
+        "task_id": "6",
+        "trial": 1,
+        "description": "Incorrect product reads and missing exchange write."
+      },
+      {
+        "task_id": "14",
+        "trial": 1,
+        "description": "The benchmark requests returns for two orders in one conversation; this is outside the product's single-order-thread boundary."
+      },
+      {
+        "task_id": "15",
+        "trial": 1,
+        "description": "Incorrect order reads and missing modification write."
+      }
+    ]
+  },
+  "post_hoc_product_scope_audit": {
+    "not_an_official_or_pre_registered_score": true,
+    "excluded_cross_order_task_ids": ["11", "14"],
+    "excluded_runs": 6,
+    "excluded_successes": 2,
+    "product_scope_runs": 24,
+    "product_scope_successes": 22,
+    "descriptive_product_scope_rate": 0.9166666666666666,
+    "remaining_in_scope_failed_runs": 2
+  },
+  "budget": {
+    "user_approved_cny": 5.0,
+    "execution_ceiling_usd": 0.7,
+    "reference_exchange_rate_cny_per_usd": 6.6838,
+    "execution_ceiling_cny": 4.67866,
+    "recorded_estimated_cost_usd": 0.229411134,
+    "recorded_estimated_cost_cny": 1.5333381232692,
+    "actual_invoice_cost": null,
+    "unrecorded_retry_cost": null,
+    "observed_request_retry_incidents": 0,
+    "exchange_rate_source": "https://www.boc.cn/sourcedb/whpj/?source=banner",
+    "model_pricing_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+  },
+  "development_re_evaluation_completed": true,
+  "holdout_executed": false,
+  "implementation_frozen": true,
+  "frozen_at": "2026-11-19T18:08:05.3291641+08:00",
+  "freeze_report": "reports/phase5b_v3_freeze.json",
+  "freeze_blocker": null
+}

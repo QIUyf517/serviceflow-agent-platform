@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "run_id": "phase5b-initial",
+  "track": "tau2_retail_official_tasks_custom_deepseek_judge",
+  "split": "development",
+  "official_score_eligible": false,
+  "task_count": 10,
+  "trials_per_task": 3,
+  "runs_per_architecture": 30,
+  "scoring_profile": "tau2_semantic_prompt_deepseek_judge",
+  "development_communicate_info_count": 0,
+  "single_agent": {
+    "successes": 22,
+    "failures": 8,
+    "success_rate": 0.7333333333333333,
+    "average_latency_seconds": 25.529981690001055,
+    "p95_latency_seconds": 36.32387059999746,
+    "total_tool_calls": 161,
+    "guard_rejections": 22,
+    "max_steps_failures": 4,
+    "estimated_cost_usd": 0.236454708,
+    "per_task_success_rate": {
+      "0": 0.3333333333333333,
+      "1": 0.6666666666666666,
+      "6": 1.0,
+      "7": 0.0,
+      "8": 1.0,
+      "10": 1.0,
+      "11": 1.0,
+      "13": 1.0,
+      "14": 0.3333333333333333,
+      "15": 1.0
+    }
+  },
+  "multi_agent": {
+    "successes": 8,
+    "failures": 22,
+    "success_rate": 0.26666666666666666,
+    "average_latency_seconds": 26.30319767666515,
+    "p95_latency_seconds": 35.975734299980104,
+    "total_tool_calls": 161,
+    "guard_rejections": 47,
+    "max_steps_failures": 1,
+    "estimated_cost_usd": 0.26921050799999996,
+    "per_task_success_rate": {
+      "0": 0.3333333333333333,
+      "1": 0.3333333333333333,
+      "6": 0.3333333333333333,
+      "7": 0.0,
+      "8": 0.3333333333333333,
+      "10": 1.0,
+      "11": 0.0,
+      "13": 0.3333333333333333,
+      "14": 0.0,
+      "15": 0.0
+    },
+    "confirmed_then_wrong_role_rejection": {
+      "failed_runs_with_pattern": 7,
+      "successful_runs_with_pattern": 1,
+      "evidence": "explicit confirmation followed by Tool not allowed for the selected specialist"
+    }
+  },
+  "comparison": {
+    "success_rate_delta_multi_minus_single": -0.4666666666666667,
+    "latency_delta_seconds_multi_minus_single": 0.7732159866640952,
+    "recorded_runs_estimated_cost_usd": 0.505665216,
+    "approved_total_budget_usd": 0.7,
+    "recorded_runs_estimated_remaining_usd": 0.194334784,
+    "actual_invoice_cost_usd": null,
+    "unrecorded_failed_attempt_cost_usd": null
+  },
+  "cost_method": {
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "rate_schedule": "conservative_peak",
+    "cache_hit_input_usd_per_million": 0.006,
+    "cache_miss_input_usd_per_million": 0.3,
+    "output_usd_per_million": 1.2,
+    "user_prompt_cache_classification": "unavailable_treated_as_cache_miss"
+  },
+  "execution_incidents": [
+    {
+      "kind": "windows_console_encoding",
+      "effect": "first single-agent task was retried four times before the run stopped",
+      "resolution": "stdout and stderr reconfigured to UTF-8 before the successful run",
+      "cost_recording": "provider invoice required; failed-attempt token usage was not persisted"
+    }
+  ],
+  "post_evaluation_fix": {
+    "status": "implemented_locally_not_re_evaluated",
+    "multi_prompt_version": "tau2-deterministic-supervisor-specialists-v2",
+    "adapter_sha256": "71a8f433ab94fce818b4e68abf017a0627d8a5da827a4dac462a10098be2d3c0",
+    "description": "Preserve the resolution route after a prose-only confirmation request; an exact write summary and a subsequent explicit confirmation are still required before execution."
+  },
+  "holdout_executed": false,
+  "conclusion": "On this development sample, the current multi-agent design is materially worse than the controlled single-agent baseline. This is a development result, not an official default tau2 score."
+}

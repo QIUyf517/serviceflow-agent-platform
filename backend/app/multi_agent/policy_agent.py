@@ -119,12 +119,27 @@ class PolicyAgent:
 
     def run(self, state: AgentState) -> dict[str, object]:
         query = self._query(state)
-        selected = self._selected_strategy(query)
         write_task = any(
             task.intent
             in {"cancel_order", "modify_order", "return_order", "exchange_order"}
             for task in state["task_plan"]
         )
+        policy_terms = {
+            "cancel_order": "cancellation policy",
+            "return_order": "return policy",
+            "exchange_order": "exchange policy",
+            "modify_order": "modify order policy",
+        }
+        if write_task:
+            query = " ".join(
+                [query]
+                + [
+                    policy_terms[task.intent]
+                    for task in state["task_plan"]
+                    if task.intent in policy_terms
+                ]
+            )
+        selected = self._selected_strategy(query)
         tool_results: list[dict[str, object]] = []
         fallback_code: str | None = None
         try:

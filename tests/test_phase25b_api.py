@@ -40,7 +40,7 @@ def test_api_full_cancel_confirmation_execution_and_audit(service, monkeypatch):
         )
         request = create_plan_and_request(client, sid)
         assert request["status"] == "pending_confirmation"
-        assert "Cancel order o" in request["summary"]
+        assert "取消订单 o；原因：下错单" in request["summary"]
 
         pending = client.get(
             f"/api/v1/multi-agent/cancel-requests/{request['request_id']}",

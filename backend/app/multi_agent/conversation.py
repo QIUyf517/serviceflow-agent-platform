@@ -29,6 +29,7 @@ from app.multi_agent.triage import (
     ORDER_ID,
     MockTriage,
     ThreadScopedTriage,
+    TriageProvider,
     mentioned_order_ids,
 )
 from app.multi_agent.workflow import SessionStateStore, run_execution_turn, run_turn
@@ -63,6 +64,7 @@ OUT_OF_SCOPE = re.compile(
 )
 HUMAN_SUGGESTION = "如需人工客服，请回复“转人工”。"
 UNRESOLVED_NOTICE = "智能客服当前无法解决这个问题。"
+WRITE_INTENTS = {"cancel_order", "modify_order", "return_order", "exchange_order"}
 
 
 def _rehydrate_policy_context(service: RetailService, state: AgentState) -> list[dict[str, Any]]:
@@ -201,6 +203,22 @@ def _explicit_human_request(message: str) -> bool:
     return bool(HUMAN_REQUEST.search(message.strip()))
 
 
+def _has_order_write_intent(message: str) -> bool:
+    """Recognize a write request without letting model output define thread scope."""
+    try:
+        triage = MockTriage().classify(message)
+    except ValueError:
+        return bool(
+            re.search(
+                r"(?:取消|退货|换货|修改).{0,12}(?:订单|商品|地址|支付)?"
+                r"|\b(?:cancel|return|exchange|modify)\b",
+                message,
+                re.I,
+            )
+        )
+    return bool(WRITE_INTENTS.intersection(triage.intents))
+
+
 def _consultation_route(message: str, outcome: dict[str, Any]) -> str:
     status = outcome.get("task_status")
     if status in {
@@ -333,8 +351,8 @@ def _store_pending(
                 task.status = "blocked"
                 task.required_inputs = ["user_confirmation"]
         response = (
-            f"待确认：{request.summary}。如确认，请回复“确认”或回显："
-            f"{request.confirmation_text}；如拒绝，请回复“拒绝”。"
+            f"待确认：{request.summary}。请核对操作内容；"
+            "确认请回复“确认”，拒绝请回复“拒绝”。订单尚未修改。"
         )
         updated = apply_agent_update(
             state,
@@ -515,6 +533,7 @@ def run_after_sales_conversation(
     *,
     request_id: str | None = None,
     thread: dict[str, Any] | None = None,
+    triage_provider: TriageProvider | None = None,
 ) -> dict[str, Any]:
     """Run one natural-language turn; confirmation decisions are deterministic."""
     began = perf_counter()
@@ -615,6 +634,12 @@ def run_after_sales_conversation(
             value for value in mentioned_order_ids(phrase) if value != thread_order_id
         ]
         if cross_orders:
+            if active is not None and active.status != "executing":
+                execution.supersede_request(
+                    sid,
+                    active.request_id,
+                    reason="order_scope_mismatch",
+                )
             current_route = "order_scope_mismatch"
             response = (
                 f"当前对话已绑定订单 {thread_order_id}，不能在同一窗口处理其他订单。"
@@ -629,6 +654,29 @@ def run_after_sales_conversation(
                     tool_results=[],
                 )
             )
+
+    if thread is not None and thread.get("kind") == "general" and (
+        active is not None or _has_order_write_intent(phrase)
+    ):
+        if active is not None and active.status != "executing":
+            execution.supersede_request(
+                sid,
+                active.request_id,
+                reason="order_thread_required",
+            )
+        current_route = "order_thread_required"
+        return finish(
+            _response(
+                began,
+                task_status="order_thread_required",
+                final_response=(
+                    "通用咨询不能修改订单。请在“我的订单”中打开需要处理的订单客服窗口，"
+                    "每个窗口只处理其绑定订单。"
+                ),
+                trace=[],
+                tool_results=[],
+            )
+        )
 
     if _explicit_human_request(phrase):
         current_route = "human_handoff"
@@ -819,7 +867,7 @@ def run_after_sales_conversation(
         sid,
         phrase,
         (
-            ThreadScopedTriage(MockTriage(), thread_order_id)
+            ThreadScopedTriage(triage_provider or MockTriage(), thread_order_id)
             if thread_order_id is not None
             else MockTriage()
         ),

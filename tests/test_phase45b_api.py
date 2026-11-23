@@ -98,9 +98,13 @@ def test_customer_conversation_requires_identity_and_stays_session_bound(service
         client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "关于订单 o：取消订单"},
+            json={"message": "关于订单 o：取消订单", "order_id": "o"},
         )
-        history = client.get("/api/v1/customer/conversation", headers={"x-session-id": sid}).json()
+        history = client.get(
+            "/api/v1/customer/conversation",
+            headers={"x-session-id": sid},
+            params={"order_id": "o"},
+        ).json()
         assert [entry["role"] for entry in history] == ["user", "assistant"]
         assert "取消订单" in history[0]["content"]
         assert "取消原因" in history[1]["content"]

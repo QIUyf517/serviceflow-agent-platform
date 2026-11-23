@@ -1,0 +1,47 @@
+{
+  "phase": "5A",
+  "status": "smoke_passed",
+  "formal_scores_generated": false,
+  "official_holdout_executed": false,
+  "official_development_tasks": 10,
+  "official_holdout_tasks": 40,
+  "reliability_scenarios": 10,
+  "checks": [
+    "manifest_hashes_verified",
+    "official_source_hashes_verified",
+    "development_holdout_disjoint",
+    "holdout_matches_official_test_split",
+    "official_task_bodies_not_parsed_or_exposed",
+    "reliability_test_nodes_verified",
+    "official_and_reliability_results_separated"
+  ],
+  "external_llm_calls": 0,
+  "executed_at": "2026-11-18T07:39:48.954388+00:00",
+  "python": "3.12.16",
+  "smoke_scenario_ids": [
+    "REL-001",
+    "REL-002",
+    "REL-003",
+    "REL-004",
+    "REL-005",
+    "REL-006",
+    "REL-007",
+    "REL-008",
+    "REL-009",
+    "REL-010"
+  ],
+  "smoke_test_nodes": [
+    "tests/test_phase22_workflow.py::test_supervisor_order_query_requires_identity_and_order",
+    "tests/test_phase45b_consultation.py::test_order_query_uses_identity_and_foreign_order_is_not_disclosed",
+    "tests/test_phase25b_execution.py::test_execute_without_confirmation_does_not_change_or_consume_request",
+    "tests/test_phase25b_execution.py::test_non_pending_or_already_cancelled_order_is_rejected",
+    "tests/test_phase25b_execution.py::test_parameter_change_after_confirmation_invalidates_execution",
+    "tests/test_phase25b_execution.py::test_idempotent_prepare_and_execute_return_one_effect",
+    "tests/test_phase3_execution_recovery.py::test_order_change_is_not_retried_and_stays_explainable",
+    "tests/test_phase3_failures.py::test_sqlite_timeout_is_normalized_and_tool_retry_writes_once",
+    "tests/test_phase5a_evaluation.py::test_unsupported_arbitrary_refund_never_creates_an_execution_request",
+    "tests/test_phase26_return.py::test_document_prompt_injection_and_cross_node_write_are_rejected"
+  ],
+  "pytest_exit_code": 0,
+  "pytest_summary": "11 passed in 4.95s"
+}

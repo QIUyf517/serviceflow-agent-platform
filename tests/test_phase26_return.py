@@ -113,7 +113,7 @@ def test_return_two_turn_flow_records_request_not_refund(service):
         policy,
     )
     assert first["task_status"] == "pending_confirmation"
-    assert "refund is not disbursed" in first["pending_confirmation"]["summary"]
+    assert "尚未实际退款" in first["pending_confirmation"]["summary"]
     assert service.order(sid, "o")["status"] == "delivered"
 
     second = run_after_sales_conversation(
@@ -131,6 +131,47 @@ def test_return_two_turn_flow_records_request_not_refund(service):
     assert order["return_item_quantities"] == {"i": 1}
     assert order["return_refund_status"] == "requested_not_disbursed"
     assert "尚未发生真实退款" in second["final_response"]
+
+
+def test_one_order_multiple_items_use_one_confirmation_and_one_transaction(service):
+    delivered_service(service)
+    with Session(service.engine) as db, db.begin():
+        row = db.get(OrderRow, "o")
+        payload = deepcopy(row.order_json)
+        payload["items"].append(
+            {
+                "item_id": "j",
+                "product_id": "p",
+                "name": "Test product",
+                "options": {"variant": "second"},
+                "price": 10.0,
+            }
+        )
+        payload["payment_history"][0]["amount"] = 20.0
+        row.order_json = payload
+
+    execution, sid, request = prepare_return(service, quantities="i:1,j:1")
+    assert request.proposed_parameters["item_quantities"] == {"i": 1, "j": 1}
+    assert request.status == "pending_confirmation"
+    confirmation = execution.record_decision(
+        sid,
+        request.request_id,
+        decision="confirm",
+        confirmation_text=request.confirmation_text,
+    )
+    result = execution.execute_return(
+        sid,
+        request.request_id,
+        idempotency_key=request.idempotency_key,
+    )
+
+    assert confirmation.order_id == "o"
+    assert result.status == "succeeded" and result.order_id == "o"
+    order = service.order(sid, "o")
+    assert order["return_item_quantities"] == {"i": 1, "j": 1}
+    assert order["return_items"] == ["i", "j"]
+    audit = execution.audit_events(sid, request.request_id)
+    assert sum(event["event_type"] == "execution_succeeded" for event in audit) == 1
 
 
 def test_return_no_confirmation_rejection_and_foreign_owner_do_not_write(service):

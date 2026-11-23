@@ -98,7 +98,15 @@ def _cancel_reason(value: str | None) -> str | None:
     normalized = value.strip().casefold()
     if normalized in {"ordered by mistake", "mistake", "买错了", "下错单", "误下单"}:
         return "ordered by mistake"
-    if normalized in {"no longer needed", "don't need it", "不需要了", "不想要了"}:
+    if normalized in {
+        "no longer needed",
+        "don't need it",
+        "不要了",
+        "不用了",
+        "不需要了",
+        "不想要了",
+        "不再需要了",
+    }:
         return "no longer needed"
     return value.strip()
 

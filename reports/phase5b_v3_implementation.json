@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "version": "tau2-deterministic-supervisor-specialists-v3",
+  "status": "frozen_holdout_pending_authorization",
+  "scope": "tau2 multi-agent evaluation adapter",
+  "adapter_sha256": "fd41dc31514e688c46129713519fe2a7387c099ab4d09de33347997b505923ab",
+  "changes": [
+    "server-owned structured write-workflow state",
+    "workflow-first routing across identity verification and generic follow-up messages",
+    "exact proposal arguments bound to a SHA-256 fingerprint",
+    "changed proposal invalidates the previous confirmation",
+    "explicit abort clears the workflow",
+    "successful write results advance the workflow without relying on assistant prose",
+    "resolution prompt delegates confirmation enforcement to deterministic adapter code"
+  ],
+  "workflow_stages": [
+    "idle",
+    "gathering",
+    "awaiting_confirmation",
+    "executing",
+    "post_execution",
+    "blocked"
+  ],
+  "verification": {
+    "focused_tests": "29 passed across affected files",
+    "full_tests": "253 passed, 0 failed, 0 skipped",
+    "full_test_seconds": 51.23,
+    "ruff": "passed",
+    "postgres_phase_schema_residue": 0
+  },
+  "external_llm_calls": null,
+  "external_llm_call_count_note": "Thirty paid simulations completed; the exact provider request count is not persisted because one simulation can contain multiple model turns.",
+  "development_re_evaluation_executed": true,
+  "development_re_evaluation": {
+    "run_id": "phase5b-v3",
+    "successes": 24,
+    "runs": 30,
+    "success_rate": 0.8,
+    "pass_at_3": 0.6,
+    "guard_rejections": 0,
+    "confirmed_then_wrong_role_failures": 0,
+    "estimated_total_cost_usd": 0.229411134,
+    "estimated_total_cost_cny": 1.5333381232692,
+    "actual_invoice_cost": null
+  },
+  "holdout_executed": false,
+  "implementation_frozen": true,
+  "frozen_at": "2026-11-19T18:08:05.3291641+08:00",
+  "freeze_report": "reports/phase5b_v3_freeze.json",
+  "known_limits": [
+    "The product does not support processing multiple orders in one support thread; tasks 11 and 14 exercise that out-of-scope batch behavior and remain failures in the full score.",
+    "Tasks 6 and 15 each retain one in-scope model-selection failure.",
+    "Trial success varied between 60% and 90%; the development sample does not establish production-level stability.",
+    "The workflow is held in the tau2 conversation state; this change does not add a product database table or cross-process recovery.",
+    "Deterministic guards, exact confirmation, tool budgets, transactions, idempotency and audit boundaries remain unchanged."
+  ]
+}

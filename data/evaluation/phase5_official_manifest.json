@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "kind": "official_tau2_retail",
+  "upstream_repository": "https://github.com/sierra-research/tau2-bench",
+  "upstream_commit": "da0835f6c67baef58bdda18f2a3b037dfb3a1754",
+  "data_sha256": {
+    "db.json": "413a65160adbdb5fde0ffc0015c49b6d70250b10c18128de169b597af7766765",
+    "policy.md": "2c9652afbce57d6e087768d37cda64d31c53d50b3e3225cfdb791bac66466467",
+    "tasks.json": "8e03ebce7901bd6218e7a7dc3105faa9324091a68058f7fe61c65262868812e8",
+    "split_tasks.json": "ed0580ec52575b63fbf76568af42490da6ee7783ecb4aa81af46961291358f20"
+  },
+  "development": {
+    "access": "development",
+    "source_split": "train",
+    "task_ids": ["0", "1", "6", "7", "8", "10", "11", "13", "14", "15"]
+  },
+  "holdout": {
+    "access": "holdout",
+    "source_split": "test",
+    "task_ids": [
+      "5", "9", "12", "17", "18", "26", "27", "32", "33", "36",
+      "38", "39", "40", "42", "45", "49", "51", "53", "55", "56",
+      "60", "61", "62", "64", "65", "68", "70", "71", "74", "77",
+      "79", "86", "90", "94", "97", "100", "101", "102", "108", "111"
+    ]
+  },
+  "holdout_policy": {
+    "phase5a_task_body_access": "prohibited",
+    "prompt_tuning_allowed": false,
+    "agent_runtime_evaluation_criteria_access": false,
+    "first_scored_use": "phase5b"
+  }
+}

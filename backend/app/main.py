@@ -575,9 +575,18 @@ def multi_agent_chat(
     threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
     """Natural-language cancel/return flow; confirmation parsing is deterministic."""
+    from app.llm import OpenAICompatibleProvider, ProviderError
     from app.multi_agent.conversation import run_after_sales_conversation
     from app.multi_agent.policy_agent import build_policy_agent
+    from app.multi_agent.triage import HybridTriage, MockTriage
 
+    customer_settings = Settings()
+    triage_provider = MockTriage()
+    if customer_settings.customer_triage_provider == "hybrid":
+        try:
+            triage_provider = HybridTriage(OpenAICompatibleProvider(customer_settings))
+        except ProviderError:
+            pass
     local_settings = Settings(
         _env_file=None,
         agent_provider="mock",
@@ -596,6 +605,7 @@ def multi_agent_chat(
         policy_agent,
         request_id=request.request_id,
         thread=thread,
+        triage_provider=triage_provider,
     )
 
 

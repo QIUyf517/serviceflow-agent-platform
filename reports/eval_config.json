@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "phase": "5A",
+  "status": "prepared_not_run",
+  "official_manifest": "data/evaluation/phase5_official_manifest.json",
+  "official_manifest_sha256": "17aee2c84c3793e373e7feb5c77ac49b018753a7f1503df15ce980e08f7d8631",
+  "reliability_manifest": "data/evaluation/reliability_scenarios_v1.json",
+  "reliability_manifest_sha256": "d39a6f7ee107954f2fe989d2ffae5ae145b491db96415cfb39f0db1b08564164",
+  "official_results_namespace": "reports/raw/official_tasks_custom_judge/phase5",
+  "reliability_results_namespace": "reports/raw/reliability/phase5",
+  "smoke_provider": "mock",
+  "smoke_scenario_ids": [
+    "REL-001",
+    "REL-002",
+    "REL-003",
+    "REL-004",
+    "REL-005",
+    "REL-006",
+    "REL-007",
+    "REL-008",
+    "REL-009",
+    "REL-010"
+  ],
+  "formal": {
+    "provider": "openai_compatible",
+    "model": "deepseek-v4-flash",
+    "official_agent_model_alias": "deepseek-flash",
+    "user_simulator_model": "deepseek/deepseek-flash",
+    "semantic_judge_provider": "deepseek",
+    "semantic_judge_model": "deepseek/deepseek-flash",
+    "scoring_profile": "tau2_semantic_prompt_deepseek_judge",
+    "temperature": 0.0,
+    "seed": null,
+    "task_seed": 42,
+    "num_trials": 3,
+    "max_steps": 40,
+    "max_tool_calls": 6,
+    "max_output_tokens": 1024,
+    "max_total_tokens": 120000,
+    "max_concurrency": 1,
+    "pricing_basis": "record_at_run_time"
+  },
+  "arms": [
+    {
+      "id": "rules",
+      "tracks": ["reliability"],
+      "guard_profile": "serviceflow-deterministic-v1",
+      "tool_contract": "serviceflow-fair-v1"
+    },
+    {
+      "id": "single_agent",
+      "tracks": ["official_tasks_custom_judge", "reliability"],
+      "guard_profile": "serviceflow-deterministic-v1",
+      "tool_contract": "serviceflow-fair-v1"
+    },
+    {
+      "id": "multi_agent",
+      "tracks": ["official_tasks_custom_judge", "reliability"],
+      "guard_profile": "serviceflow-deterministic-v1",
+      "tool_contract": "serviceflow-fair-v1"
+    },
+    {
+      "id": "multi_agent_recovery",
+      "tracks": ["reliability"],
+      "guard_profile": "serviceflow-deterministic-v1",
+      "tool_contract": "serviceflow-fair-v1"
+    }
+  ],
+  "notes": [
+    "Phase 5A validates manifests and key-free smoke tests only; it does not produce formal scores.",
+    "The Phase 5A preparation code hashes tasks.json but does not parse or expose task bodies or evaluation criteria.",
+    "Model pricing must be captured from the provider at the actual Phase 5B run date.",
+    "Official tau2 results and ServiceFlow-authored reliability results must never be combined."
+  ]
+}

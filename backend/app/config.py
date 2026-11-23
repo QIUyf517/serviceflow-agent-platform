@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     operator_demo_id: str = "operator-demo"
     approval_ttl_seconds: int = 86_400
     agent_provider: Literal["mock", "openai_compatible"] = "mock"
+    customer_triage_provider: Literal["mock", "hybrid"] = "mock"
     agent_model: str = "gpt-4.1-mini"
     agent_base_url: str = "https://api.openai.com/v1"
     agent_api_key: SecretStr | None = None
@@ -31,6 +32,8 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     agent_timeout_seconds: float = 30.0
     agent_max_tool_calls: int = 6
+    agent_max_output_tokens: int = 1_024
+    agent_max_total_tokens: int = 120_000
     agent_temperature: float = 0.0
     agent_seed: int | None = 42
     agent_input_usd_per_million: float | None = None

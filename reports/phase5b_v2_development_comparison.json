@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "split": "development",
+  "track": "tau2_retail_official_tasks_custom_deepseek_judge",
+  "official_score_eligible": false,
+  "task_count": 10,
+  "trials_per_task": 3,
+  "single_agent_v1": {
+    "run_id": "phase5b-initial",
+    "successes": 22,
+    "runs": 30,
+    "success_rate": 0.7333333333333333
+  },
+  "multi_agent_v1": {
+    "run_id": "phase5b-initial",
+    "prompt_version": "tau2-deterministic-supervisor-specialists-v1",
+    "successes": 8,
+    "runs": 30,
+    "success_rate": 0.26666666666666666,
+    "average_latency_seconds": 26.30319767666515,
+    "p95_latency_seconds": 35.975734299980104,
+    "tool_calls": 161,
+    "guard_rejections": 47,
+    "user_stop_failures": 21,
+    "max_steps_failures": 1,
+    "read_actions": {
+      "correct": 127,
+      "total": 130,
+      "rate": 0.9769230769230769
+    },
+    "write_actions": {
+      "correct": 6,
+      "total": 32,
+      "rate": 0.1875
+    },
+    "estimated_cost_usd": 0.26921050799999996,
+    "confirmed_then_wrong_role_failures": 7
+  },
+  "multi_agent_v2": {
+    "run_id": "phase5b-v2",
+    "prompt_version": "tau2-deterministic-supervisor-specialists-v2",
+    "adapter_sha256": "71a8f433ab94fce818b4e68abf017a0627d8a5da827a4dac462a10098be2d3c0",
+    "successes": 15,
+    "runs": 30,
+    "success_rate": 0.5,
+    "average_latency_seconds": 26.632014500000516,
+    "p95_latency_seconds": 36.34633850000682,
+    "tool_calls": 171,
+    "guard_rejections": 38,
+    "user_stop_failures": 10,
+    "max_steps_failures": 5,
+    "read_actions": {
+      "correct": 107,
+      "total": 109,
+      "rate": 0.981651376146789
+    },
+    "write_actions": {
+      "correct": 15,
+      "total": 27,
+      "rate": 0.5555555555555556
+    },
+    "estimated_cost_usd": 0.26558477399999997,
+    "confirmed_then_wrong_role_failures": 5,
+    "per_task_success_rate": {
+      "0": 0.6666666666666666,
+      "1": 1.0,
+      "6": 0.0,
+      "7": 0.0,
+      "8": 0.6666666666666666,
+      "10": 1.0,
+      "11": 0.3333333333333333,
+      "13": 0.6666666666666666,
+      "14": 0.3333333333333333,
+      "15": 0.3333333333333333
+    }
+  },
+  "comparison": {
+    "v2_minus_v1_successes": 7,
+    "v2_minus_v1_success_rate": 0.23333333333333334,
+    "v2_minus_single_successes": -7,
+    "v2_minus_single_success_rate": -0.23333333333333334,
+    "v2_minus_v1_guard_rejections": -9,
+    "v2_minus_v1_tool_calls": 10,
+    "conclusion": "The v2 routing fix materially improves the multi-agent development result but does not close the gap to the unchanged single-agent baseline. The implementation is not frozen."
+  },
+  "budget": {
+    "user_approved_cny": 10.0,
+    "execution_ceiling_usd": 1.4,
+    "reference_exchange_rate_cny_per_usd": 6.6824,
+    "execution_ceiling_cny": 9.35536,
+    "recorded_estimated_cost_usd": 0.26558477399999997,
+    "recorded_estimated_cost_cny": 1.7747436937775998,
+    "actual_invoice_cost": null,
+    "unrecorded_retry_cost": null,
+    "exchange_rate_source": "https://www.boc.cn/sourcedb/whpj/index.html",
+    "model_pricing_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+  },
+  "incidents": [
+    {
+      "kind": "model_request_failed",
+      "count_observed": 1,
+      "resolution": "upstream automatic retry succeeded",
+      "cost_recording": "failed-request token usage was not fully persisted; provider invoice reconciliation required"
+    }
+  ],
+  "holdout_executed": false,
+  "implementation_frozen": false
+}

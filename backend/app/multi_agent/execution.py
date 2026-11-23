@@ -234,13 +234,19 @@ class ExecutionService:
             and value not in (None, [], {})
         }
         if request.action == "cancel":
-            summary = f"Cancel order {request.order_id}; reason={parameters.get('reason')}"
+            reason = {
+                "no longer needed": "不再需要",
+                "ordered by mistake": "下错单",
+            }.get(str(parameters.get("reason")), "未说明")
+            summary = f"取消订单 {request.order_id}；原因：{reason}"
         elif request.action == "return":
+            quantities = parameters.get("item_quantities") or {}
+            items = "、".join(f"{item_id} × {quantity}" for item_id, quantity in quantities.items())
             summary = (
-                f"Register return request for order {request.order_id}; "
-                f"items={parameters.get('item_quantities')}; "
-                f"refund_method={parameters.get('payment_method_id')}; "
-                "impact=order status becomes return requested; refund is not disbursed"
+                f"为订单 {request.order_id} 提交退货申请；"
+                f"商品项及数量：{items}；"
+                f"退款途径：{parameters.get('payment_method_id')}；"
+                "订单状态将变为已申请退货，尚未实际退款"
             )
         else:
             raise BusinessError("execution_action_not_allowed", 403)

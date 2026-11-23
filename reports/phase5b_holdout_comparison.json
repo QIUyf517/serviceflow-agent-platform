@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "status": "completed_no_holdout_tuning_allowed",
+  "reported_at": "2026-11-21T00:00:00+08:00",
+  "execution_completed_at": "2026-11-20T16:06:13+08:00",
+  "track": "tau2_retail_official_tasks_custom_deepseek_judge",
+  "official_score_eligible": false,
+  "sample": {
+    "task_count": 40,
+    "trials_per_task": 3,
+    "paired_runs_per_architecture": 120,
+    "total_runs": 240,
+    "seed": 42,
+    "temperature": 0.0,
+    "max_steps": 40,
+    "max_tool_calls": 6,
+    "max_concurrency": 1
+  },
+  "results": {
+    "single_agent": {
+      "successes": 51,
+      "runs": 120,
+      "success_rate": 0.425,
+      "recoverable_raw_runs": 117,
+      "console_recovered_runs": 3,
+      "recoverable_raw_successes": 49,
+      "console_recovered_successes": 2,
+      "summary": "reports/raw/official_tasks_custom_judge/phase5/holdout/phase5b-final-single-remainder/single_agent_summary.json"
+    },
+    "multi_agent_v3": {
+      "successes": 45,
+      "runs": 120,
+      "success_rate": 0.375,
+      "recoverable_raw_runs": 120,
+      "recoverable_raw_successes": 45,
+      "summary": "reports/raw/official_tasks_custom_judge/phase5/holdout/phase5b-final-multi/multi_agent_summary.json"
+    },
+    "multi_minus_single": {
+      "successes": -6,
+      "percentage_points": -5.0,
+      "approximate_paired_95_percent_ci_percentage_points": [
+        -11.900468867275274,
+        1.9004688672752734
+      ]
+    }
+  },
+  "paired_analysis": {
+    "pairs": 120,
+    "both_success": 39,
+    "single_only_success": 12,
+    "multi_only_success": 6,
+    "both_fail": 63,
+    "seed_mismatches": 0,
+    "mcnemar_exact_two_sided_p": 0.237884521484375,
+    "interpretation": "V3 did not demonstrate superiority on holdout; the observed five-point deficit is not statistically decisive at the 0.05 level."
+  },
+  "development_to_holdout": {
+    "single_agent": {
+      "development_rate": 0.7333333333333333,
+      "holdout_rate": 0.425,
+      "change_percentage_points": -30.83333333333333
+    },
+    "multi_agent_v3": {
+      "development_rate": 0.8,
+      "holdout_rate": 0.375,
+      "change_percentage_points": -42.5
+    },
+    "development_advantage_reversed": true
+  },
+  "usage_and_cost": {
+    "tracked_agent_and_user_tokens": 20363791,
+    "tracked_single_agent_cost_usd": 0.891734748,
+    "tracked_multi_agent_cost_usd": 0.906761442,
+    "tracked_combined_cost_usd": 1.79849619,
+    "tracked_combined_cost_cny_at_conservative_7_2": 12.949172568,
+    "approved_combined_ceiling_usd": 2.7,
+    "approved_budget_cny": 20.0,
+    "provider_invoice_reconciliation_required": true,
+    "excluded_from_tracked_cost": [
+      "three console-recovered single-agent task-5 runs",
+      "semantic judge calls",
+      "failed requests without persisted usage"
+    ]
+  },
+  "incidents": [
+    {
+      "type": "windows_checkpoint_encoding_failure",
+      "impact": "Task 5 rewards survived only in console output; full traces and usage for three single-agent runs were lost.",
+      "mitigation": "The observed 2/3 result was retained without rerunning task 5; the remaining 39 tasks ran separately.",
+      "evidence": "reports/phase5b_holdout_incident_20261120.json"
+    },
+    {
+      "type": "default_openai_nl_assertions_judge",
+      "impact": "One task-38 attempt was recorded as infrastructure_error with no reward.",
+      "mitigation": "The unchanged upstream NL-assertion prompt was explicitly routed to DeepSeek; the infrastructure-error record was removed and retried by the upstream checkpoint policy.",
+      "agent_or_guard_changed": false
+    }
+  ],
+  "integrity": {
+    "agent_adapters_changed_after_v3_freeze": false,
+    "failed_scored_runs_removed": false,
+    "holdout_used_for_tuning": false,
+    "future_v3_holdout_reruns_allowed": false,
+    "task_5_resampled_after_checkpoint_loss": false,
+    "infrastructure_errors_in_final_scored_set": 0
+  },
+  "decision": {
+    "phase5b_complete": true,
+    "v3_superiority_claim_supported": false,
+    "v3_inferiority_claim_proven": false,
+    "freeze_v3_results": true,
+    "next_stage": "5C result analysis and portfolio delivery; no V3 tuning against this holdout"
+  }
+}

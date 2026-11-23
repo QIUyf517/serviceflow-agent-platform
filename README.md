@@ -1,6 +1,6 @@
 # ServiceFlow — 可信多 Agent 智能售后平台
 
-> 状态：阶段 4.5 已于 2026-11-15 通过最终验收。模拟商店客服已支持内容安全先检、政策/商品/订单/售后分流、多轮追问、按订单隔离并恢复会话，以及顾客与人工客服双向回复。阶段 5 尚未开始。
+> 状态：阶段 5 已完成。独立保留集没有复现开发集优势：单 Agent **51/120（42.50%）**，多 Agent V3 **45/120（37.50%）**，配对 McNemar `p=0.238`。证据不支持 V3 优越，也不足以证明确定劣势；holdout 已冻结。结果使用 DeepSeek 自定义 Judge，不具备官方默认 τ-bench 分数资格。
 
 ## 项目定位
 
@@ -9,6 +9,30 @@
 - 目标用户：电商客户（聊天窗口）、售后客服/主管（工单与人工接管）、开发者（执行轨迹与评测）。
 - 核心价值：**从回答问题升级为安全地完成售后业务**。
 - 求职亮点：Tool Calling、RAG、业务 API、Multi-Agent、状态持久化、权限/幂等、可复现评测。
+
+## 已实现安全架构
+
+```mermaid
+flowchart LR
+  C[顾客 / 商家客服] --> API[FastAPI + 服务端会话]
+  API --> ID[身份、归属、订单线程]
+  ID --> SUP[确定性 Supervisor]
+  SUP --> T[Triage]
+  SUP --> O[Order 只读]
+  SUP --> P[Policy 检索]
+  SUP --> R[Resolution 提案]
+  O --> DB[(PostgreSQL)]
+  P --> KB[(政策索引 / pgvector)]
+  R --> G[确定性 Guard]
+  G -->|只读| REPLY[中文回复]
+  G -->|写操作| CONFIRM[具体摘要 + 客户明确确认]
+  CONFIRM --> RECHECK[执行前重读与规则复核]
+  RECHECK --> TX[事务 + 幂等键 + 审计]
+  TX --> DB
+  G -->|超范围/失败| HUMAN[人工工单]
+```
+
+LLM 只理解、规划、解释和选择白名单工具；身份授权、订单资格、确认绑定及数据写入均由服务端确定性代码决定。多 Agent 是被评估的架构选项，不是预设优于单 Agent 的结论。
 
 ## 文件导航
 
@@ -30,6 +54,10 @@
 - [docs/PHASE4_5C_REPORT.md](docs/PHASE4_5C_REPORT.md)：阶段 4.5C 中文体验、双向人工会话与后台聊天窗口。
 - [docs/PHASE4_5D_REPORT.md](docs/PHASE4_5D_REPORT.md)：阶段 4.5D 订单独立会话线程、串话修复与旧库迁移。
 - [docs/PHASE4_5_ACCEPTANCE_REPORT.md](docs/PHASE4_5_ACCEPTANCE_REPORT.md)：阶段 4.5 最终人工与自动化验收记录。
+- [docs/PHASE5A_REPORT.md](docs/PHASE5A_REPORT.md)：阶段 5A 评测配置、保留集边界、自建异常集与烟测验收。
+- [docs/PHASE5B_HOLDOUT_REPORT.md](docs/PHASE5B_HOLDOUT_REPORT.md)：阶段 5B 保留集对照、统计结论与事故披露。
+- [reports/summary.md](reports/summary.md)：阶段 5 最终指标、四组证据矩阵、成本与失败分类。
+- [docs/PHASE5_REPORT.md](docs/PHASE5_REPORT.md)：阶段 5 最终验收与求职交付说明。
 - [docs/DATA_AND_RAG.md](docs/DATA_AND_RAG.md)：τ-bench 下载导入、RAG、数据隔离。
 - [docs/EVALUATION.md](docs/EVALUATION.md)：基线实验、官方与扩展评测、指标。
 - [CODEX_START_HERE.md](CODEX_START_HERE.md)：第一条可以复制给 Codex 的任务提示。
@@ -803,6 +831,8 @@ HTTP/1.1 200
 - 顾客发送的 `order_id` 只是请求参数；线程由服务端在核验身份并校验订单归属后创建或恢复，客户端不能指定 `thread_id` 越权读取。
 - LangGraph 检查点按线程隔离，订单 A 的意图、补充信息和待确认请求不会出现在订单 B。
 - 订单线程内的消息若提及另一笔订单，服务端直接拒绝并提示从该订单重新打开客服窗口。
+- 通用咨询线程只提供咨询能力；取消、退货、换货和修改等写请求返回 `order_thread_required`，必须从目标订单进入客服窗口。
+- 同一句同时提到当前订单和其他订单时零部分执行，并使当前未执行提案失效；同一订单的多个商品仍可经一次明确确认在一个事务中处理。
 
 ### 线程 API
 
@@ -823,6 +853,12 @@ HTTP/1.1 200
 POST /api/v1/multi-agent/chat          {"message":"帮我取消订单","order_id":"#W1006327"}
 GET  /api/v1/multi-agent/tasks/current?order_id=#W1006327
 GET  /api/v1/customer/conversation?order_id=#W1006327
+```
+
+通用线程发起写操作时返回安全引导，不创建执行请求：
+
+```json
+{"task_status":"order_thread_required","pending_confirmation":null,"execution_result":null,"tool_results":[],"thread_kind":"general","final_response":"通用咨询不能修改订单。请在“我的订单”中打开需要处理的订单客服窗口，每个窗口只处理其绑定订单。"}
 ```
 
 响应新增 `thread_id`、`thread_order_id`、`thread_kind`；工单详情新增 `thread` 与 `related_tickets`（同一订单历史、其他订单数量，默认折叠）。顾客端标题固定显示“正在咨询订单 #…”，切换订单即切换线程并清空上一订单的确认状态；刷新页面会恢复上次打开的订单窗口及其线程。
@@ -846,3 +882,108 @@ $env:PYTHONPATH="backend"
 ## 阶段 4.5 最终验收
 
 2026-11-15，用户按收尾清单完成人工浏览器复核并确认全部通过；随后再次独立运行完整后端、前端和真实浏览器测试，结果分别为 **235 passed**、**43 passed** 和 **11 passed**，所有静态检查与生产构建通过，临时数据库 schema 残留 **0**，外部 LLM 调用 **0**。阶段 4.5 正式验收完成，具体证据、边界和命令见 [阶段 4.5 最终验收报告](docs/PHASE4_5_ACCEPTANCE_REPORT.md)。
+
+2026-11-19 顾客用语回归修复：订单客服窗口中的“这个订单不要了”“这单不想要了”等表达现在进入取消方案，原因确定性映射为“不再需要”，不会直接执行写入。确认摘要改为中文，不再在顾客聊天中显示内部英文确认令牌。例如，在已核验且绑定订单 `#W1006327` 的窗口请求：
+
+```http
+POST /api/v1/multi-agent/chat
+X-Session-Id: <已核验会话>
+Content-Type: application/json
+
+{"message":"这个订单不要了","order_id":"#W1006327"}
+
+HTTP/1.1 200
+{"task_status":"pending_confirmation","pending_confirmation":{"order_id":"#W1006327","proposed_parameters":{"reason":"no longer needed"},"summary":"取消订单 #W1006327；原因：不再需要"},"final_response":"待确认：取消订单 #W1006327；原因：不再需要。请核对操作内容；确认请回复“确认”，拒绝请回复“拒绝”。订单尚未修改。"}
+```
+
+示例仅列出关键字段；实际响应还包含请求 ID、追踪和策略结果。只有客户随后明确确认、服务端重检通过才执行。验证：完整后端 **253 passed、0 failed、0 skipped**（含本地 PostgreSQL 临时 schema），Ruff 通过；外部 LLM 调用 **0**。
+
+2026-11-19 补充模型理解：订单客服窗口先用本地规则处理明确表达；规则无法识别或取消原因不明时，用配置的兼容模型分类。例如“这笔我下错了，帮我撤掉”会识别为取消、原因 `ordered by mistake`，再由服务端绑定当前订单、检索取消政策、校验资格，并返回待确认摘要。模型仅给出意图和原因，不能决定订单归属或执行写入。模型返回无效 JSON、编造订单号、低置信度结果或接口故障时回退到本地解析，无法确认的表达继续追问。通用咨询窗口仍禁止订单写操作，不调用模型处理写动作。
+
+本地 Compose 的 `api` 服务在 `.env` 提供 `LLM_API_KEY`、`LLM_MODEL_ID`、`LLM_BASE_URL` 时启用 `CUSTOMER_TRIAGE_PROVIDER=hybrid`；缺少密钥时自动使用本地规则。可设 `CUSTOMER_TRIAGE_PROVIDER=mock` 关闭外部模型调用。每次需要模型理解的消息会增加一次模型请求和相应延迟与费用，明确规则命中的消息没有模型费用。示例输入输出：
+
+```http
+POST /api/v1/multi-agent/chat
+X-Session-Id: <已核验会话>
+Content-Type: application/json
+
+{"message":"这笔我下错了，帮我撤掉","order_id":"#W1006327"}
+
+HTTP/1.1 200
+{"task_status":"pending_confirmation","pending_confirmation":{"order_id":"#W1006327","proposed_parameters":{"reason":"ordered by mistake"}},"final_response":"待确认：取消订单 #W1006327；原因：下错单。请核对操作内容；确认请回复“确认”，拒绝请回复“拒绝”。订单尚未修改。"}
+```
+
+以上为预期响应的关键字段示例，具体措辞取决于服务器展示映射。验证命令：`.\.venv_tau\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp=.pytest_model_full`（本机 PostgreSQL 测试需设置 `TEST_DATABASE_URL`）；`.\.venv_tau\Scripts\python.exe -m ruff check backend scripts tests`。
+本次实际结果：完整后端 **259 passed、0 failed、0 skipped**，Ruff 通过；真实 DeepSeek 分类烟测 **1 次成功**。本机运行中的 API 已更新并通过健康检查。若以后重新创建 API 容器，请先执行 `docker compose up -d --build api` 使工作区代码写入新镜像；当前运行容器内的热更新本身不会进入旧镜像。
+
+## 阶段 5A：评测准备与异常集
+
+阶段 5A 固定了 τ-bench Retail 上游 commit 和原始文件哈希，沿用 10 项 train 开发样本，并把官方完整 40 项 test split 声明为保留集。准备代码只对 `tasks.json` 做字节哈希校验，不解析或暴露任务正文、参考动作与评分条件；5A 不运行保留集、不产生官方分数。
+
+自建可靠性集包含身份、授权、确认、政策、提案绑定、幂等、状态竞争、故障恢复、不支持写动作和恶意文档注入 10 类场景。每个场景都绑定现有或新增的真实 pytest 节点，并明确 `official_score_eligible=false`。官方结果和自建结果使用不同输出命名空间。
+
+```powershell
+# 只校验配置、哈希、split 和测试引用
+.\.venv_tau\Scripts\python.exe -m scripts.prepare_phase5a
+
+# 无密钥运行 10 类可靠性烟测；不会运行官方保留集
+.\.venv_tau\Scripts\python.exe -m scripts.prepare_phase5a --run-smoke
+```
+
+2026-11-18 最终实测：5A 烟测 **11 passed**，完整后端 **239 passed、0 failed、0 skipped**，Ruff 通过；外部 LLM 调用 **0**，官方保留集执行 **0**，正式分数生成 **0**。配置见 [eval_config.json](reports/eval_config.json)，实际烟测记录见 [phase5a_smoke.json](reports/phase5a_smoke.json)，完整边界和已知限制见 [阶段 5A 报告](docs/PHASE5A_REPORT.md)。
+
+## 阶段 5B：公平对照执行（已完成）
+
+单 Agent 与“确定性 Supervisor + 专职角色”的多 Agent 已接到同一个上游 τ-bench Retail 接口。两者共享原版工具清单、同一确定性 Guard、相同模型与任务集合，并强制每任务最多 6 次工具调用、单次最多 1024 输出 token、累计最多 120000 token。多 Agent 的角色只缩小当轮工具可见范围，不改变服务端身份、归属和明确确认规则。被测 Agent、用户模拟器和语义 Judge 统一使用 DeepSeek；保留上游语义评分 Prompt，但替换了默认 Judge 模型，因此只能称为“官方任务上的 DeepSeek 自定义评测”。
+
+默认命令只生成计划，不调用外部模型：
+
+```powershell
+.\.venv_tau\Scripts\python.exe -m scripts.run_phase5b_official --split development
+.\.venv_tau\Scripts\python.exe -m scripts.run_phase5b_official --split holdout
+
+# 自建可靠性轨道：Mock/确定性测试，无外部模型费用
+.\.venv_tau\Scripts\python.exe -m scripts.run_phase5b_reliability
+```
+
+2026-11-18 已运行自建可靠性轨道：**10/10 通过**，外部 LLM 调用 0。开发集单 Agent **22/30（73.33%）**，多 Agent v1 **8/30（26.67%）**、v2 **15/30（50.00%）**、v3 **24/30（80.00%）**。V3 修复了确认后角色丢失，但 2026-11-20 完成的独立 test 保留集没有复现开发集优势：单 Agent **51/120（42.50%）**，V3 **45/120（37.50%）**，V3 低 5 个百分点；McNemar 精确双侧 `p=0.238`，近似配对 95% 区间为 −11.9 至 +1.9 个百分点。结论是 V3 未证明优于单 Agent，同时也不能把本次差距解释为确定劣势。该 holdout 已冻结，禁止继续用于调参或同版本重跑。
+
+保留集可恢复记录约 2036.38 万 token，Agent 与顾客模拟器峰值费率估算 `$1.7985`（保守按 7.2 元/美元约 `¥12.95`）；语义 Judge、单 Agent 任务 5 的 3 次不可恢复 token 和失败请求未完整计入，实际费用以 Provider 账单为准。评分保留上游 Prompt，但 Judge 使用 DeepSeek，因此结果不是官方默认 τ-bench 分数。详见 [5B 保留集报告](docs/PHASE5B_HOLDOUT_REPORT.md)和[结构化对照结果](reports/phase5b_holdout_comparison.json)。
+
+冻结的 10 项开发样本不含 `communicate_info`；保留集的 `communicate_info` 与 `nl_assertions` 均由 `deepseek/deepseek-flash` 按未修改的上游语义 Prompt 评分。V3 已冻结，5B 已完成；5C 只分析冻结结果，不得用该 holdout 继续修改 V3。详见 [阶段 5B 进度报告](docs/PHASE5B_PROGRESS.md)、[V3 冻结报告](docs/PHASE5B_V3_FREEZE_REPORT.md)、[保留集报告](docs/PHASE5B_HOLDOUT_REPORT.md)和[v3 开发集对照](reports/phase5b_v3_development_comparison.json)。
+
+## 阶段 5C：结果分析与求职交付（已完成）
+
+5C 没有重跑或调优 holdout。`scripts.build_phase5c_report` 从冻结的逐次 CSV、开发/保留集汇总和本地脱敏轨迹重算配对统计、延迟、可比 usage 子集及失败双轴分类，并用 SHA256 记录输入。原始轨迹继续位于被 Git 忽略的 `reports/raw/`，不会把模拟客户明细、任务正文或评分参考动作提交到交付报告。
+
+```mermaid
+flowchart LR
+  F[固定上游 commit / 哈希] --> DEV[10 项 train 开发样本]
+  F --> HOLD[40 项 test 保留集]
+  DEV --> FREEZE[V3 冻结]
+  FREEZE --> HOLD
+  HOLD --> PAIR[120 对单 Agent / V3 trial]
+  REL[10 个自建可靠性场景] --> SEP[独立工程可靠性轨道]
+  PAIR --> OUT[配对统计 / 延迟 / token / 成本 / 失败分类]
+  SEP --> OUT
+  OUT --> REPORT[summary + 结构化 JSON + 失败目录]
+```
+
+四组证据不能伪装为四组同口径实验：规则流程只有 10 个自建确定性场景；单 Agent 与 V3 才有 120 对官方任务自定义 Judge 结果；恢复增强只有 `REL-008` 的 1/1 专项证据。可靠性 10/10 仅表示绑定断言在本次各一次执行中通过，不是生产环境“100% 可靠率”。
+
+只读复现与演示：
+
+```powershell
+# 重新计算并检查 JSON、Markdown、SVG 与冻结输入一致；不调用模型、不写数据库
+.\.venv_tau\Scripts\python.exe -m scripts.build_phase5c_report --check
+
+# 输出一页求职演示摘要
+.\.venv_tau\Scripts\python.exe -m scripts.demo_phase5c
+
+# 5C 专项测试
+.\.venv_tau\Scripts\python.exe -m pytest -q tests/test_phase5c_analysis.py -p no:cacheprovider --basetemp=.tmp/pytest-phase5c
+```
+
+主要交付为[最终评测摘要](reports/summary.md)、[结构化分析](reports/phase5c_analysis.json)、[失败目录](reports/failures/phase5c_failure_catalog.md)和[阶段 5 验收报告](docs/PHASE5_REPORT.md)。5C 不修改业务 API；既有顾客写操作输入/输出示例和服务端安全边界保持不变。
+
+2026-11-22 最终实测：5C 专项 **5 passed**；带真实 PostgreSQL 随机 schema 的完整后端 **269 passed、0 failed、0 skipped（101.68s）**；Ruff、报告一致性检查和只读演示通过；`phase*` 测试 schema 残留 **0**；外部 LLM 调用 **0**，holdout 重跑 **0**。

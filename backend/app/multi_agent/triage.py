@@ -18,6 +18,11 @@ PRODUCT_ID = re.compile(
 BARE_ID = re.compile(r"#?[A-Za-z0-9_-]+")
 ORDER_INTENTS = {"order_query", "cancel_order", "modify_order", "return_order", "exchange_order"}
 NON_IDS = {"status", "cancel", "return", "exchange", "modify", "details", "information", "policy"}
+ORDER_NOT_WANTED = re.compile(
+    r"(?:订单|这单|那单).{0,8}(?:不要了|不想要了|不需要了|不再需要了?)"
+    r"|(?:不要了|不想要了|不需要了|不再需要了?).{0,8}(?:订单|这单|那单)"
+    r"|(?:不要|不想要|不需要)(?:这个|这笔|这张|那个)?订单了?"
+)
 
 
 class TriageError(Exception):
@@ -164,8 +169,12 @@ class MockTriage:
             policy_question and not execution_request
         ):
             intents.append("exchange_order")
-        if _action_mentioned(phrase, "取消", "cancel") and not (
-            policy_question and not execution_request
+        colloquial_cancel = bool(ORDER_NOT_WANTED.search(phrase)) and not (
+            policy_question or phrase.endswith(("吗", "？", "?"))
+        )
+        if colloquial_cancel or (
+            _action_mentioned(phrase, "取消", "cancel")
+            and not (policy_question and not execution_request)
         ):
             intents.append("cancel_order")
         if (
@@ -280,10 +289,12 @@ class MockTriage:
             extracted["reason"] = reason_match.group(1).strip()
         elif any(word in lowered for word in ("ordered by mistake", "买错了", "下错单", "误下单")):
             extracted["reason"] = "ordered by mistake"
-        elif any(
+        elif colloquial_cancel or any(
             word in lowered
             for word in (
                 "no longer needed",
+                "不要了",
+                "不用了",
                 "不需要了",
                 "不想要了",
                 "不再需要",
@@ -351,6 +362,14 @@ class LLMTriage:
             "in intents. "
             "For an order list request set requested_action=list_orders and order_id=null. "
             "Do not invent identifiers. Preserve a leading # in any order ID exactly. "
+            "Understand colloquial Chinese, including 撤单、下错单、后悔买了、不要这单了 "
+            "as possible cancel requests. "
+            "A question about how cancellation or returns work is policy_inquiry, "
+            "not a request to execute. "
+            "For cancel_order set requested_action=cancel_order. "
+            "When the customer clearly gives a reason, "
+            "map a mistaken purchase to reason='ordered by mistake' and no longer wanting it to "
+            "reason='no longer needed'. Otherwise omit reason; never invent one. "
             "Confidence is an uncalibrated reference. "
             "Give a short classification reason, not private reasoning. "
             "Do not claim any task executed."
@@ -388,6 +407,36 @@ class LLMTriage:
             except (ValidationError, ValueError):
                 last_error = "structured_output_invalid"
         raise TriageError(last_error)
+
+
+class HybridTriage:
+    """Use the model for unclear language; keep the offline parser as a safe fallback."""
+
+    def __init__(self, provider: ModelProvider) -> None:
+        self.rules = MockTriage()
+        self.model = LLMTriage(provider, max_attempts=1)
+
+    def classify(self, message: str, previous: TriageResult | None = None) -> TriageResult:
+        rule = self.rules.classify(message, previous)
+        if rule.intents != ["unknown"] and not (
+            rule.intents == ["cancel_order"]
+            and "reason" not in rule.extracted_parameters
+        ):
+            return rule
+        try:
+            model = self.model.classify(message, previous)
+        except TriageError:
+            return rule
+        if model.intents == ["unknown"] or model.confidence < 0.6:
+            return rule
+        if rule.intents != ["unknown"] and model.intents != rule.intents:
+            return rule
+        if model.intents == ["cancel_order"]:
+            reason = model.extracted_parameters.get("reason")
+            if reason not in {"ordered by mistake", "no longer needed"}:
+                model.extracted_parameters.pop("reason", None)
+            model = model.model_copy(update={"requested_action": "cancel_order"})
+        return model
 
 
 class ThreadScopedTriage:

@@ -37,7 +37,12 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: runtime
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      CUSTOMER_TRIAGE_PROVIDER: ${CUSTOMER_TRIAGE_PROVIDER:-hybrid}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL_ID: ${LLM_MODEL_ID:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
     env_file:
       - .env.phase4
     command: ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "/app/backend", "--host", "0.0.0.0", "--port", "8000"]

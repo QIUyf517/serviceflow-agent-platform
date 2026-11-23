@@ -3,7 +3,7 @@ import json
 import pytest
 from app.llm import ModelReply, ProviderError
 from app.multi_agent.models import TriageResult
-from app.multi_agent.triage import LLMTriage, MockTriage, TriageError
+from app.multi_agent.triage import HybridTriage, LLMTriage, MockTriage, TriageError
 
 
 @pytest.mark.parametrize(
@@ -39,6 +39,19 @@ def test_policy_question_does_not_become_write_request():
     assert result.intents == ["order_query", "policy_inquiry"]
     assert result.requested_action == "get_order_status"
     assert MockTriage().classify("What is the return policy?").intents == ["policy_inquiry"]
+
+
+@pytest.mark.parametrize("message", ["这个订单不要了", "这单不想要了", "我不需要这个订单了"])
+def test_colloquial_order_cancel_is_recognized(message):
+    result = MockTriage().classify(message)
+    assert result.intents == ["cancel_order"]
+    assert result.requested_action == "cancel_order"
+    assert result.extracted_parameters["reason"] == "no longer needed"
+
+
+def test_colloquial_cancel_question_and_product_request_are_not_order_writes():
+    assert MockTriage().classify("这个订单不要了怎么办？").intents == ["policy_inquiry"]
+    assert "cancel_order" not in MockTriage().classify("这个商品不要了").intents
 
 
 def test_mock_missing_order_then_followup():
@@ -142,3 +155,59 @@ def test_llm_provider_error_is_sanitized():
     with pytest.raises(TriageError, match="provider_unavailable") as exc:
         LLMTriage(BrokenProvider()).classify("查询订单123")
     assert "private transport details" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        ("这笔我下错了，帮我撤掉", "ordered by mistake"),
+        ("买完又后悔了，这单帮我撤了吧", "no longer needed"),
+    ],
+)
+def test_hybrid_understands_unseen_cancel_phrasings(message, reason):
+    reply = valid_reply(
+        intent="cancel_order",
+        intents=["cancel_order"],
+        order_id=None,
+        requested_action="cancel_order",
+        extracted_parameters={"reason": reason},
+    )
+    provider = ScriptedProvider([reply])
+    result = HybridTriage(provider).classify(message)
+    assert result.intent == "cancel_order"
+    assert result.extracted_parameters["reason"] == reason
+    assert result.needs_clarification
+    assert provider.calls == 1
+
+
+def test_hybrid_does_not_call_model_for_clear_rule_or_trust_invented_order():
+    provider = ScriptedProvider([valid_reply(order_id="other")])
+    assert HybridTriage(provider).classify("这个订单不要了").intent == "cancel_order"
+    assert provider.calls == 0
+    result = HybridTriage(provider).classify("这笔我下错了，帮我撤掉")
+    assert result.intent == "unknown"
+    assert result.order_id is None
+
+
+def test_hybrid_model_failure_falls_back_without_executing():
+    provider = ScriptedProvider([ModelReply(content="invalid")])
+    result = HybridTriage(provider).classify("这笔我下错了，帮我撤掉")
+    assert result.intent == "unknown"
+    assert provider.calls == 1
+
+
+def test_hybrid_low_confidence_does_not_prepare_a_write():
+    provider = ScriptedProvider(
+        [
+            valid_reply(
+                intent="cancel_order",
+                intents=["cancel_order"],
+                order_id=None,
+                requested_action="cancel_order",
+                extracted_parameters={"reason": "no longer needed"},
+                confidence=0.2,
+            )
+        ]
+    )
+    result = HybridTriage(provider).classify("这笔我下错了，帮我撤掉")
+    assert result.intent == "unknown"

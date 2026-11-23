@@ -1,15 +1,19 @@
 """Phase 4.5D: server-side order threads keep one customer's orders apart."""
 
+import json
 from copy import deepcopy
 
 import pytest
-from app.database import engine_for, seed
+from app.database import ExecutionRequestRow, MessageRow, engine_for, seed
+from app.llm import ModelReply
 from app.main import app, get_service, get_ticket_service
 from app.multi_agent.workflow import SessionStateStore
 from app.retail import validate
 from app.service import RetailService
 from app.ticketing import TicketService
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 OPERATOR_TOKEN = "phase45d-local-operator-token"
 
@@ -135,6 +139,52 @@ def conversation(client, sid: str, order_id: str | None = None) -> list[dict]:
     return response.json()
 
 
+def test_model_understands_unseen_cancel_but_requires_confirmation(
+    two_order_service, monkeypatch
+):
+    import app.llm as llm
+
+    calls = []
+
+    class FakeProvider:
+        def __init__(self, settings):
+            assert settings.customer_triage_provider == "hybrid"
+
+        def complete(self, messages, tools):
+            calls.append(messages[-1]["content"])
+            return ModelReply(
+                content=json.dumps(
+                    {
+                        "intent": "cancel_order",
+                        "intents": ["cancel_order"],
+                        "order_id": None,
+                        "product_id": None,
+                        "requested_action": "cancel_order",
+                        "extracted_parameters": {"reason": "ordered by mistake"},
+                        "missing_information": [],
+                        "needs_clarification": False,
+                        "confidence": 0.8,
+                        "reasoning_summary": "Customer wants to undo a mistaken purchase.",
+                    }
+                )
+            )
+
+    monkeypatch.setenv("CUSTOMER_TRIAGE_PROVIDER", "hybrid")
+    monkeypatch.setattr(llm, "OpenAICompatibleProvider", FakeProvider)
+    client = configured_client(two_order_service, monkeypatch)
+    try:
+        sid = verified_session(client)
+        response = chat(client, sid, "这笔我下错了，帮我撤掉", order_id="o")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["task_status"] == "pending_confirmation"
+        assert body["pending_confirmation"]["order_id"] == "o"
+        assert "下错" in calls[0]
+        assert two_order_service.order(sid, "o")["status"] == "pending"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_two_orders_get_distinct_threads_and_isolated_messages(two_order_service, monkeypatch):
     client = configured_client(two_order_service, monkeypatch)
     try:
@@ -250,6 +300,37 @@ def test_general_consultation_never_enters_an_order_thread(two_order_service, mo
         app.dependency_overrides.clear()
 
 
+def test_general_thread_requires_an_order_window_for_business_writes(
+    two_order_service, monkeypatch
+):
+    client = configured_client(two_order_service, monkeypatch)
+    try:
+        sid = verified_session(client)
+        response = chat(client, sid, "帮我取消订单 o，因为误下单")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["thread_kind"] == "general"
+        assert body["task_status"] == "order_thread_required"
+        assert body["consultation_route"] == "order_thread_required"
+        assert body["pending_confirmation"] is None
+        assert body["execution_result"] is None
+        assert body["tool_results"] == []
+        assert "打开需要处理的订单客服窗口" in body["final_response"]
+        assert two_order_service.order(sid, "o")["status"] == "pending"
+
+        with Session(two_order_service.engine) as db:
+            assert db.scalar(select(func.count()).select_from(ExecutionRequestRow)) == 0
+            audit = db.scalars(
+                select(MessageRow)
+                .where(MessageRow.thread_id == body["thread_id"])
+                .order_by(MessageRow.sequence)
+            ).all()
+        assert audit[-1].meta["task_status"] == "order_thread_required"
+        assert audit[-1].meta["consultation_route"] == "order_thread_required"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_cross_customer_thread_access_is_rejected(two_order_service, monkeypatch):
     client = configured_client(two_order_service, monkeypatch)
     try:
@@ -332,18 +413,79 @@ def test_switching_threads_does_not_carry_a_pending_confirmation(two_order_servi
         app.dependency_overrides.clear()
 
 
+def test_colloquial_cancel_in_order_thread_requires_confirmation(two_order_service, monkeypatch):
+    client = configured_client(two_order_service, monkeypatch)
+    try:
+        sid = verified_session(client)
+        waiting = chat(client, sid, "这个订单不要了", order_id="o")
+        assert waiting.status_code == 200
+        body = waiting.json()
+        assert body["task_status"] == "pending_confirmation"
+        assert body["pending_confirmation"]["proposed_parameters"]["reason"] == "no longer needed"
+        assert "待确认：取消订单 o；原因：不再需要" in body["final_response"]
+        assert "confirm cancel_order" not in body["final_response"]
+        assert two_order_service.order(sid, "o")["status"] == "pending"
+
+        repeated = chat(client, sid, "这个订单不要了", order_id="o").json()
+        assert repeated["task_status"] == "pending_confirmation"
+        assert repeated["request_id"] == body["request_id"]
+        assert "取消订单 o；原因：不再需要" in repeated["final_response"]
+        assert "Cancel order" not in repeated["final_response"]
+        assert two_order_service.order(sid, "o")["status"] == "pending"
+
+        confirmed = chat(
+            client, sid, "确认", order_id="o", request_id=body["request_id"]
+        ).json()
+        assert confirmed["task_status"] == "executed"
+        assert two_order_service.order(sid, "o")["status"] == "cancelled"
+        assert two_order_service.order(sid, "o2")["status"] == "pending"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_colloquial_cancel_in_general_thread_requires_order_window(two_order_service, monkeypatch):
+    client = configured_client(two_order_service, monkeypatch)
+    try:
+        sid = verified_session(client)
+        body = chat(client, sid, "这个订单不要了").json()
+        assert body["task_status"] == "order_thread_required"
+        assert body["pending_confirmation"] is None
+        assert two_order_service.order(sid, "o")["status"] == "pending"
+        assert two_order_service.order(sid, "o2")["status"] == "pending"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_order_thread_refuses_messages_about_another_order(two_order_service, monkeypatch):
     client = configured_client(two_order_service, monkeypatch)
     try:
         sid = verified_session(client)
-        response = chat(client, sid, "帮我取消订单 o2，因为误下单", order_id="o")
+        response = chat(
+            client,
+            sid,
+            "请同时取消订单 o 和订单 o2，因为都是误下单",
+            order_id="o",
+        )
         assert response.status_code == 200
         body = response.json()
         assert body["task_status"] == "order_scope_mismatch"
         assert "o2" not in body["final_response"] or "绑定订单 o" in body["final_response"]
         assert body["pending_confirmation"] is None
+        assert body["execution_result"] is None
+        assert body["tool_results"] == []
         assert two_order_service.order(sid, "o2")["status"] == "pending"
         assert two_order_service.order(sid, "o")["status"] == "pending"
+
+        with Session(two_order_service.engine) as db:
+            assert db.scalar(select(func.count()).select_from(ExecutionRequestRow)) == 0
+            audit_messages = db.scalars(
+                select(MessageRow)
+                .where(MessageRow.thread_id == body["thread_id"])
+                .order_by(MessageRow.sequence)
+            ).all()
+        assert [row.role for row in audit_messages] == ["user", "assistant"]
+        assert audit_messages[-1].meta["task_status"] == "order_scope_mismatch"
+        assert audit_messages[-1].meta["consultation_route"] == "order_scope_mismatch"
     finally:
         app.dependency_overrides.clear()
 

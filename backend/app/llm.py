@@ -45,6 +45,7 @@ class OpenAICompatibleProvider:
         self.timeout = settings.agent_timeout_seconds
         self.transport = transport
         self.temperature = settings.agent_temperature
+        self.max_output_tokens = settings.agent_max_output_tokens
         self.seed = None if self.deepseek else settings.agent_seed
         self.last_usage: dict[str, int] | None = None
         self.total_usage: dict[str, int] = {}
@@ -57,6 +58,7 @@ class OpenAICompatibleProvider:
             "tools": tools,
             "tool_choice": "auto" if tools else "none",
             "temperature": self.temperature,
+            "max_tokens": self.max_output_tokens,
         }
         if self.deepseek:
             request["thinking"] = {"type": "disabled"}

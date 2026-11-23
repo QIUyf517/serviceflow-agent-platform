@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "phase": "5B",
+  "stage": "v3_single_order_thread_boundary_and_freeze",
+  "status": "frozen_holdout_completed_no_further_tuning",
+  "frozen_at": "2026-11-20T13:46:56.5328449+08:00",
+  "product_scope": {
+    "conversation_boundary": "one server-owned support thread binds at most one order",
+    "cross_order_write_behavior": "fail_closed_and_open_target_order_thread",
+    "general_thread_write_behavior": "fail_closed_and_open_order_thread",
+    "same_order_multi_item_behavior": "one exact confirmation and one transactional execution",
+    "multi_order_batch_execution_supported": false
+  },
+  "implementation_sha256": {
+    "backend/app/multi_agent/conversation.py": "f38afe5623237eb81382a7f78fc54b98c142c019f613d053be4cfe2878826e9c",
+    "backend/app/support_threads.py": "b6d3635becc7b90dba8da7eab1371c975f1ca280d5f92623b1dc810acc369b82",
+    "backend/app/integrations/tau2.py": "9ccd17b03f71c00d953cf4a1d4a86804c94d957feab886be2d9a9be0e854db8d",
+    "backend/app/integrations/tau2_multi.py": "fd41dc31514e688c46129713519fe2a7387c099ab4d09de33347997b505923ab"
+  },
+  "test_sha256": {
+    "tests/test_phase45d_threads.py": "473822c28f0438b3e2b3a51977df08ce2b2c64f1ea1e66e71e5f203402b43e86",
+    "tests/test_phase26_return.py": "35d3cd6e711641dee65f1515c9cf03b9af4d5e844ecff384a311c37c3de976df",
+    "tests/test_phase25c_api.py": "9cf2d56805a5469e30252696cc59c26b1a84794d93bf84cabc0afc34e4796df3",
+    "tests/test_phase45b_api.py": "f989784dcdff641ad3da51d34ae58de25497263c202ce479c03caa20c6ac6990",
+    "tests/test_phase5b_evaluation.py": "ba265be417cd424eb5a859ccd60e4af2447c1dbae18a3b402caaebd78e56fddc"
+  },
+  "development_result": {
+    "overall_successes": 24,
+    "overall_runs": 30,
+    "overall_success_rate": 0.8,
+    "official_score_eligible": false,
+    "judge_profile": "tau2_semantic_prompt_deepseek_judge"
+  },
+  "post_hoc_product_scope_audit": {
+    "not_an_official_or_pre_registered_score": true,
+    "cross_order_task_ids": [
+      "11",
+      "14"
+    ],
+    "cross_order_runs": 6,
+    "cross_order_successes": 2,
+    "product_scope_runs": 24,
+    "product_scope_successes": 22,
+    "descriptive_product_scope_rate": 0.9166666666666666,
+    "remaining_in_scope_failures": [
+      {
+        "task_id": "6",
+        "trial": 1,
+        "cause": "incorrect product selection and missing exchange write"
+      },
+      {
+        "task_id": "15",
+        "trial": 1,
+        "cause": "incorrect order selection and missing modification write"
+      }
+    ]
+  },
+  "verification": {
+    "boundary_tests": "5 passed",
+    "affected_test_files": "29 passed",
+    "budget_and_recovery_tests": "8 passed",
+    "full_backend_postgresql": "264 passed, 0 failed, 0 skipped",
+    "full_backend_seconds": 95.64,
+    "ruff": "passed",
+    "postgres_phase_schema_residue": 0,
+    "external_llm_calls": 0,
+    "holdout_runs": 0
+  },
+  "evaluation_integrity": {
+    "tau_adapter_changed_after_paid_v3_development_run": false,
+    "development_raw_failures_retained": true,
+    "holdout_task_bodies_opened": true,
+    "holdout_executed": true,
+    "holdout_requires_new_budget_authorization": false,
+    "authorized_budget_cny": 20.0,
+    "architecture_ceilings_usd": {
+      "single_agent": 1.35,
+      "multi_agent": 1.35
+    },
+    "maximum_combined_ceiling_usd": 2.7,
+    "holdout_comparison": "reports/phase5b_holdout_comparison.json",
+    "holdout_tuning_prohibited": true
+  },
+  "freeze_decision": {
+    "implementation_frozen": true,
+    "reason": "Product-scope deterministic order-thread boundaries and safety tests pass; cross-order batch work is explicitly unsupported, while the remaining model-selection failures are retained as known limitations.",
+    "changes_after_freeze_require_new_version": true
+  },
+  "evaluation_runner": {
+    "pre_holdout_sha256": "18eb4fcb71298f61b49b3ebc652d26183deac0ec6e88d7e78c74d454cafeacc6",
+    "completion_sha256": "ac88ebaebcfe413de5e91495b1a51ef6e0f0c1acc745640aeb2a8e7643d051f7",
+    "changed_after_holdout_started": true,
+    "change_scope": [
+      "UTF-8 checkpoint recovery",
+      "DeepSeek routing for the unchanged upstream NL assertions judge prompt",
+      "resume from the registered task prefix",
+      "budget preflight and cumulative fuse"
+    ],
+    "agent_prompt_guard_or_tools_changed": false
+  }
+}

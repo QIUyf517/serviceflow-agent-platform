@@ -31,7 +31,10 @@ def start_cancel(client, sid):
     response = client.post(
         "/api/v1/multi-agent/chat",
         headers={"x-session-id": sid},
-        json={"message": "Please cancel order o because ordered by mistake"},
+        json={
+            "message": "Please cancel order o because ordered by mistake",
+            "order_id": "o",
+        },
     )
     assert response.status_code == 200
     body = response.json()
@@ -57,7 +60,11 @@ def test_natural_language_two_turn_cancel_and_idempotent_resume(service, monkeyp
             == "pending"
         )
 
-        progress = client.get("/api/v1/multi-agent/tasks/current", headers={"x-session-id": sid})
+        progress = client.get(
+            "/api/v1/multi-agent/tasks/current",
+            headers={"x-session-id": sid},
+            params={"order_id": "o"},
+        )
         assert progress.status_code == 200
         assert progress.json()["pending_confirmation"]["request_id"] == request_id
         assert progress.json()["policy_context"]
@@ -68,7 +75,7 @@ def test_natural_language_two_turn_cancel_and_idempotent_resume(service, monkeyp
         confirmed = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "确认", "request_id": request_id},
+            json={"message": "确认", "request_id": request_id, "order_id": "o"},
         )
         assert confirmed.status_code == 200
         result = confirmed.json()
@@ -89,7 +96,7 @@ def test_natural_language_two_turn_cancel_and_idempotent_resume(service, monkeyp
         replay = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "确认", "request_id": request_id},
+            json={"message": "确认", "request_id": request_id, "order_id": "o"},
         )
         assert replay.status_code == 200
         assert replay.json()["execution_result"]["idempotent_replay"] is True
@@ -112,7 +119,7 @@ def test_reject_and_changed_intent_never_execute_old_request(service, monkeypatc
         rejected = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "拒绝", "request_id": request_id},
+            json={"message": "拒绝", "request_id": request_id, "order_id": "o"},
         )
         assert rejected.status_code == 200
         assert rejected.json()["task_status"] == "confirmation_rejected"
@@ -126,10 +133,11 @@ def test_reject_and_changed_intent_never_execute_old_request(service, monkeypatc
             json={
                 "message": "Please cancel order other because ordered by mistake",
                 "request_id": old_id,
+                "order_id": "o",
             },
         )
         assert changed_order.status_code == 200
-        assert changed_order.json()["task_status"] == "query_failed"
+        assert changed_order.json()["task_status"] == "order_scope_mismatch"
         assert (
             client.get(
                 f"/api/v1/multi-agent/cancel-requests/{old_id}",
@@ -143,7 +151,11 @@ def test_reject_and_changed_intent_never_execute_old_request(service, monkeypatc
         changed = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "Please show order o status", "request_id": old_id},
+            json={
+                "message": "Please show order o status",
+                "request_id": old_id,
+                "order_id": "o",
+            },
         )
         assert changed.status_code == 200
         assert changed.json()["task_status"] == "queried"
@@ -177,7 +189,11 @@ def test_expired_confirmation_and_changed_order_fail_closed(service, monkeypatch
         expired = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "确认", "request_id": waiting["request_id"]},
+            json={
+                "message": "确认",
+                "request_id": waiting["request_id"],
+                "order_id": "o",
+            },
         )
         assert expired.status_code == 200
         assert expired.json()["task_status"] == "execution_failed"
@@ -203,7 +219,11 @@ def test_expired_confirmation_and_changed_order_fail_closed(service, monkeypatch
         changed = client.post(
             "/api/v1/multi-agent/chat",
             headers={"x-session-id": sid},
-            json={"message": "确认", "request_id": waiting["request_id"]},
+            json={
+                "message": "确认",
+                "request_id": waiting["request_id"],
+                "order_id": "o",
+            },
         )
         assert changed.status_code == 200
         assert changed.json()["task_status"] == "execution_failed"
@@ -237,7 +257,7 @@ def test_session_isolation_and_unverified_identity(service, monkeypatch):
             json={"message": "Please cancel order o because ordered by mistake"},
         )
         assert unauthenticated.status_code == 200
-        assert unauthenticated.json()["task_status"] == "clarification"
+        assert unauthenticated.json()["task_status"] == "order_thread_required"
         assert unauthenticated.json()["request_id"] is None
         assert service.order(sid, "o")["status"] == "pending"
     finally:

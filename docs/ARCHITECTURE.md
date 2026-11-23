@@ -127,3 +127,25 @@ serviceflow/
 - 只从官方上游指定 commit 导入 **Retail 数据与工具定义**；我们的业务 API 可以与上游不同。
 - 在正式基准评测时，用 `integrations/tau2/` 把自己的Agent接到上游工具和消息协议，**不得用自建数据库的简化规则冒充官方基准**。
 - 官方 Retail 政策要求一轮最多一次工具调用，评测适配器应遵守上游协议；演示产品交互可独立优化。
+
+## 8. 阶段 5 冻结评测管线
+
+```mermaid
+flowchart TD
+  SRC[τ-bench Retail 固定 commit + 文件哈希] --> TRAIN[train 中 10 项开发样本]
+  SRC --> TEST[test 完整 40 项保留集]
+  TRAIN --> BASE[单 Agent 基线]
+  TRAIN --> V1[多 Agent V1 / V2 / V3]
+  V1 --> FREEZE[V3 代码、Prompt、边界与哈希冻结]
+  BASE --> TEST
+  FREEZE --> TEST
+  TEST --> PAIRS[40 任务 × 3 trial × 2 架构]
+  PAIRS --> STATS[成功率 + 配对 McNemar + 延迟 + usage]
+  RAW[冻结轨迹] --> FAIL[终止原因 + 业务动作结果]
+  REL[10 类自建可靠性场景] --> SAFE[独立安全/恢复指标]
+  STATS --> FINAL[阶段 5 最终报告]
+  FAIL --> FINAL
+  SAFE --> FINAL
+```
+
+评测任务正文、参考动作和评分条件只存在于隔离的上游评测环境与离线 5C 分析，不进入线上 Agent Prompt、产品会话或业务数据库。`reports/results.csv` 保存逐次聚合结果；包含模拟客户明细的原始轨迹位于被 Git 忽略的 `reports/raw/`。官方任务自定义 Judge 与自建可靠性轨道分别报告，不能合并成功率。

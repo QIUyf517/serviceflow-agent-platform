@@ -6,7 +6,14 @@ from app.llm import OpenAICompatibleProvider, ProviderError
 
 def test_provider_requires_key():
     with pytest.raises(ProviderError, match="agent_api_key_missing"):
-        OpenAICompatibleProvider(Settings(_env_file=None, agent_api_key=None, openai_api_key=None))
+        OpenAICompatibleProvider(
+            Settings(
+                _env_file=None,
+                agent_api_key=None,
+                openai_api_key=None,
+                llm_api_key=None,
+            )
+        )
 
 
 def test_provider_tool_call_and_usage():
@@ -14,6 +21,7 @@ def test_provider_tool_call_and_usage():
         assert request.url.path == "/v1/chat/completions"
         body = request.read().decode()
         assert '"parallel_tool_calls":false' in body
+        assert '"max_tokens":1024' in body
         return httpx.Response(
             200,
             json={

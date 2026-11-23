@@ -1,0 +1,16 @@
+{
+  "phase": "5B",
+  "track": "serviceflow_reliability",
+  "official_score_eligible": false,
+  "run_id": "phase5b-initial",
+  "executed_at": "2026-11-18T08:05:18.295511+00:00",
+  "python": "3.12.16",
+  "scenario_count": 10,
+  "passed": 10,
+  "failed": 0,
+  "external_llm_calls": 0,
+  "official_holdout_executed": false,
+  "results_csv": "reports\\results.csv",
+  "raw_evidence_namespace": "reports\\raw\\reliability\\phase5\\phase5b-initial",
+  "metric_evidence": "Each value is asserted by the bound pytest test; it is not an official score."
+}
