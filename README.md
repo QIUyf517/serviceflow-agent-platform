@@ -39,6 +39,15 @@ flowchart LR
 
 LLM 可以提出意图、计划和解释，但不能自行决定客户身份、订单归属或写入结果。操作成功只以数据库事务结果为准。
 
+<details>
+<summary><strong>查看完整业务流程图（点击展开）</strong></summary>
+
+下图覆盖内容安全、身份绑定、咨询分流、政策检索、订单读写、明确确认、人工接管和结果留存。点击图片可查看原始尺寸。
+
+[![ServiceFlow 完整业务流程图](docs/images/serviceflow-business-flow.png)](docs/images/serviceflow-business-flow.png)
+
+</details>
+
 ## 产品界面
 
 上方商城首屏展示公开商品目录；商品规格、实时可售状态与价格直接读取业务数据库：
