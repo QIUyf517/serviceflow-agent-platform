@@ -2,6 +2,7 @@ name: flowagent
 
 x-backend-environment: &backend-environment
   OPERATOR_DEMO_ID: ${OPERATOR_DEMO_ID:-operator-demo}
+  MERCHANT_DEMO_ID: ${MERCHANT_DEMO_ID:-merchant-demo}
   AGENT_PROVIDER: mock
   POLICY_RETRIEVAL_STRATEGY: keyword
   CHECKPOINT_POOL_MIN_SIZE: ${CHECKPOINT_POOL_MIN_SIZE:-1}

@@ -1,6 +1,9 @@
 import type {
   ApprovalRecord,
   CloseReason,
+  KnowledgeDocument,
+  KnowledgeDocumentInput,
+  KnowledgeSearchHit,
   OperatorExecutionResult,
   TicketAuditEvent,
   TicketDetail,
@@ -103,4 +106,38 @@ export const operatorApi = {
     operatorRequest<OperatorExecutionResult>(ticketPath(ticketId, '/execute'), {
       method: 'POST',
     }),
+
+  listKnowledge: () =>
+    operatorRequest<{ merchant_id: string; items: KnowledgeDocument[] }>(
+      `${API}/merchant/knowledge-documents`,
+    ),
+
+  createKnowledge: (input: KnowledgeDocumentInput) =>
+    operatorRequest<KnowledgeDocument>(`${API}/merchant/knowledge-documents`, {
+      method: 'POST',
+      body: input,
+    }),
+
+  updateKnowledge: (documentId: string, input: KnowledgeDocumentInput) =>
+    operatorRequest<KnowledgeDocument>(
+      `${API}/merchant/knowledge-documents/${encodeURIComponent(documentId)}`,
+      { method: 'PUT', body: input },
+    ),
+
+  publishKnowledge: (documentId: string) =>
+    operatorRequest<KnowledgeDocument>(
+      `${API}/merchant/knowledge-documents/${encodeURIComponent(documentId)}/publish`,
+      { method: 'POST' },
+    ),
+
+  archiveKnowledge: (documentId: string) =>
+    operatorRequest<KnowledgeDocument>(
+      `${API}/merchant/knowledge-documents/${encodeURIComponent(documentId)}/archive`,
+      { method: 'POST' },
+    ),
+
+  searchKnowledge: (query: string) =>
+    operatorRequest<{ query: string; method: string; hits: KnowledgeSearchHit[] }>(
+      `${API}/merchant/knowledge-documents/search?q=${encodeURIComponent(query)}`,
+    ),
 }

@@ -144,3 +144,38 @@ export interface TicketFilters {
 }
 
 export type OperatorExecutionResult = ExecutionResult
+
+export type KnowledgeCategory = 'logistics' | 'faq' | 'product_guide' | 'service_notice'
+export type KnowledgeStatus = 'draft' | 'published' | 'archived'
+
+export interface KnowledgeDocumentInput {
+  title: string
+  category: KnowledgeCategory
+  source_label: string
+  version: string
+  content: string
+}
+
+export interface KnowledgeDocument extends KnowledgeDocumentInput {
+  id: string
+  merchant_id: string
+  status: KnowledgeStatus
+  content_sha256: string
+  chunk_count: number
+  created_at: number
+  updated_at: number
+  published_at: number | null
+  archived_at: number | null
+  vector_status?: string
+  idempotent_replay?: boolean
+}
+
+export interface KnowledgeSearchHit {
+  chunk_id: string
+  section: string
+  source: string
+  version: string
+  content: string
+  score: number
+  retrieval_method: string
+}

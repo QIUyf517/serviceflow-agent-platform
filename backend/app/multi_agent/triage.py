@@ -113,7 +113,22 @@ class MockTriage:
             elif "product_id" in previous.missing_information:
                 product_id = phrase
 
-        policy_question = any(
+        merchant_knowledge_question = "订单" not in phrase and "order" not in lowered and any(
+            word in lowered
+            for word in (
+                "发什么快递",
+                "哪个快递",
+                "快递公司",
+                "从哪里发货",
+                "哪里发货",
+                "发货地点",
+                "发货仓",
+                "仓库发货",
+                "shipping carrier",
+                "ship from",
+            )
+        )
+        policy_question = merchant_knowledge_question or any(
             word in lowered
             for word in (
                 "政策",

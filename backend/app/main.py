@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.database import ChatTraceRow, SessionRow, engine_for
 from app.llm import OpenAICompatibleProvider, ProviderError
+from app.merchant_knowledge import MerchantKnowledgeService
 from app.multi_agent.execution import ExecutionService
 from app.multi_agent.message_store import MessageStore
 from app.multi_agent.workflow import SessionStateStore
@@ -76,6 +77,12 @@ def get_thread_service(
     service: RetailService = Depends(get_service),
 ) -> SupportThreadService:
     return SupportThreadService(service.engine)
+
+
+def get_merchant_knowledge_service(
+    service: RetailService = Depends(get_service),
+) -> MerchantKnowledgeService:
+    return MerchantKnowledgeService(service.engine)
 
 
 def _resolve_thread(
@@ -337,6 +344,92 @@ class ApprovalDecisionRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1_000)
 
 
+class KnowledgeDocumentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(min_length=1, max_length=160)
+    category: Literal["logistics", "faq", "product_guide", "service_notice"]
+    source_label: str = Field(min_length=1, max_length=200)
+    version: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    content: str = Field(min_length=1, max_length=100_000)
+
+
+@app.get("/api/v1/merchant/knowledge-documents")
+def list_knowledge_documents(
+    _operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    merchant_id = Settings().merchant_demo_id
+    return {"merchant_id": merchant_id, "items": knowledge.list_documents(merchant_id)}
+
+
+@app.post("/api/v1/merchant/knowledge-documents", status_code=201)
+def create_knowledge_document(
+    request: KnowledgeDocumentInput,
+    operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return knowledge.create_draft(
+        Settings().merchant_demo_id,
+        operator_id,
+        **request.model_dump(),
+    )
+
+
+@app.put("/api/v1/merchant/knowledge-documents/{document_id}")
+def update_knowledge_document(
+    document_id: str,
+    request: KnowledgeDocumentInput,
+    operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return knowledge.update_draft(
+        Settings().merchant_demo_id,
+        operator_id,
+        document_id,
+        **request.model_dump(),
+    )
+
+
+@app.get("/api/v1/merchant/knowledge-documents/search")
+def search_knowledge_documents(
+    q: str = Query(min_length=1, max_length=500),
+    _operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return knowledge.search(Settings().merchant_demo_id, q)
+
+
+@app.post("/api/v1/merchant/knowledge-documents/{document_id}/publish")
+def publish_knowledge_document(
+    document_id: str,
+    operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return knowledge.publish(Settings().merchant_demo_id, operator_id, document_id)
+
+
+@app.post("/api/v1/merchant/knowledge-documents/{document_id}/archive")
+def archive_knowledge_document(
+    document_id: str,
+    operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return knowledge.archive(Settings().merchant_demo_id, operator_id, document_id)
+
+
+@app.get("/api/v1/merchant/knowledge-documents/{document_id}/audit")
+def knowledge_document_audit(
+    document_id: str,
+    _operator_id: str = Depends(operator_identity),
+    knowledge: MerchantKnowledgeService = Depends(get_merchant_knowledge_service),
+) -> dict[str, Any]:
+    return {
+        "document_id": document_id,
+        "events": knowledge.audit(Settings().merchant_demo_id, document_id),
+    }
+
+
 @app.post("/api/v1/support/threads")
 def open_support_thread(
     request: SupportThreadRequest,
@@ -587,13 +680,7 @@ def multi_agent_chat(
             triage_provider = HybridTriage(OpenAICompatibleProvider(customer_settings))
         except ProviderError:
             pass
-    local_settings = Settings(
-        _env_file=None,
-        agent_provider="mock",
-        policy_retrieval_strategy="keyword",
-        policy_top_k=Settings().policy_top_k,
-        policy_embedding_api_key=None,
-    )
+    local_settings = customer_settings.model_copy(update={"agent_provider": "mock"})
     policy_agent = build_policy_agent(service.engine, local_settings)
     thread = _resolve_thread(threads, sid, request.order_id)
     return run_after_sales_conversation(
@@ -620,12 +707,7 @@ def controlled_single_agent_chat(
     from app.multi_agent.policy_agent import build_policy_agent
     from app.single_agent_controlled import run_controlled_single_agent
 
-    settings = Settings(
-        _env_file=None,
-        agent_provider="mock",
-        policy_retrieval_strategy="keyword",
-        policy_embedding_api_key=None,
-    )
+    settings = Settings().model_copy(update={"agent_provider": "mock"})
     return run_controlled_single_agent(
         service,
         execution,

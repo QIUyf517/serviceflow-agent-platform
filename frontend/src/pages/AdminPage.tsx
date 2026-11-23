@@ -12,6 +12,7 @@ import { ApiError } from '../api/errors'
 import { operatorApi } from '../api/operator'
 import { clearOperatorToken, readOperatorToken, saveOperatorToken } from '../api/operatorStore'
 import { OperatorGate } from '../components/admin/OperatorGate'
+import { KnowledgeWorkspace } from '../components/admin/KnowledgeWorkspace'
 import { TicketCaseFile } from '../components/admin/TicketCaseFile'
 import { TicketLedger, type TicketFilterDraft } from '../components/admin/TicketLedger'
 
@@ -59,6 +60,7 @@ export function AdminPage() {
   const queryClient = useQueryClient()
   const [authenticated, setAuthenticated] = useState(() => Boolean(readOperatorToken()))
   const [authVersion, setAuthVersion] = useState(0)
+  const [workspace, setWorkspace] = useState<'tickets' | 'knowledge'>('tickets')
   const [draft, setDraft] = useState<TicketFilterDraft>(EMPTY_DRAFT)
   const [filters, setFilters] = useState<TicketFilters>(DEFAULT_FILTERS)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
@@ -69,8 +71,8 @@ export function AdminPage() {
   const listQuery = useQuery({
     queryKey: ['operator', 'tickets', authVersion, filters],
     queryFn: () => operatorApi.listTickets(filters),
-    enabled: authenticated,
-    refetchInterval: authenticated ? 5_000 : false,
+    enabled: authenticated && workspace === 'tickets',
+    refetchInterval: authenticated && workspace === 'tickets' ? 5_000 : false,
   })
 
   const detailQuery = useQuery({
@@ -217,48 +219,64 @@ export function AdminPage() {
     <div className="admin-page">
       <header className="admin-intro">
         <div>
-          <p className="status-kicker">人工接管工作区</p>
-          <h1>案件先于动作。</h1>
-          <p role="status">当前列表 {listQuery.data?.total ?? 0} 张工单，自动检查新请求。</p>
+          <p className="status-kicker">
+            {workspace === 'tickets' ? '人工接管工作区' : '商家知识工作区'}
+          </p>
+          <h1>{workspace === 'tickets' ? '案件先于动作。' : '知识先于回答。'}</h1>
+          <p role="status">
+            {workspace === 'tickets'
+              ? `当前列表 ${listQuery.data?.total ?? 0} 张工单，自动检查新请求。`
+              : '只有经过发布的商家知识才会进入顾客检索。'}
+          </p>
         </div>
         <div>
-          <p>本地演示认证，不是生产 IAM。操作员不能代客户确认，审批也不能绕过 ExecutionService。</p>
+          <p>
+            {workspace === 'tickets'
+              ? '本地演示认证，不是生产 IAM。操作员不能代客户确认，审批也不能绕过 ExecutionService。'
+              : '通用说明进入知识库；具体订单的承运商、运单号和发货仓仍以业务数据库为准。'}
+          </p>
           <button className="text-button" type="button" onClick={lock}>清除操作员 token</button>
         </div>
       </header>
-      <div className="admin-workspace">
-        <TicketLedger
-          result={listQuery.data}
-          selectedTicketId={selectedTicketId}
-          draft={draft}
-          isLoading={listQuery.isLoading}
-          errorMessage={listQuery.error ? adminError(listQuery.error) : undefined}
-          onDraftChange={setDraft}
-          onFilter={applyFilters}
-          onSelect={selectTicket}
-          onPage={(direction) => setFilters((current) => ({
-            ...current,
-            offset: Math.max(0, current.offset + (direction === 'next' ? current.limit : -current.limit)),
-          }))}
-        />
-        <TicketCaseFile
-          key={`${selectedTicketId ?? 'none'}-${detailQuery.data?.status ?? 'empty'}`}
-          detail={detailQuery.data}
-          audit={auditQuery.data?.events}
-          isLoading={detailQuery.isLoading || auditQuery.isLoading}
-          isMutating={isMutating}
-          errorMessage={detailQuery.error ? adminError(detailQuery.error) : auditQuery.error ? adminError(auditQuery.error) : undefined}
-          actionError={actionError}
-          approval={approval}
-          executionResult={executionResult}
-          onAssign={(assignee) => assignMutation.mutate(assignee)}
-          onStatus={(status, closeReason) => statusMutation.mutate({ status, ...(closeReason ? { closeReason } : {}) })}
-          onCreateApproval={() => approvalMutation.mutate()}
-          onDecideApproval={(decision, reason) => decisionMutation.mutate({ decision, reason })}
-          onExecute={() => executeMutation.mutate()}
-          onReply={(content) => replyMutation.mutate(content)}
-        />
-      </div>
+      <nav className="admin-workspace-tabs" aria-label="商家工作区">
+        <button className={workspace === 'tickets' ? 'is-active' : undefined} type="button" onClick={() => setWorkspace('tickets')}>人工工单</button>
+        <button className={workspace === 'knowledge' ? 'is-active' : undefined} type="button" onClick={() => setWorkspace('knowledge')}>知识库</button>
+      </nav>
+      {workspace === 'knowledge' ? <KnowledgeWorkspace /> : (
+        <div className="admin-workspace">
+          <TicketLedger
+            result={listQuery.data}
+            selectedTicketId={selectedTicketId}
+            draft={draft}
+            isLoading={listQuery.isLoading}
+            errorMessage={listQuery.error ? adminError(listQuery.error) : undefined}
+            onDraftChange={setDraft}
+            onFilter={applyFilters}
+            onSelect={selectTicket}
+            onPage={(direction) => setFilters((current) => ({
+              ...current,
+              offset: Math.max(0, current.offset + (direction === 'next' ? current.limit : -current.limit)),
+            }))}
+          />
+          <TicketCaseFile
+            key={`${selectedTicketId ?? 'none'}-${detailQuery.data?.status ?? 'empty'}`}
+            detail={detailQuery.data}
+            audit={auditQuery.data?.events}
+            isLoading={detailQuery.isLoading || auditQuery.isLoading}
+            isMutating={isMutating}
+            errorMessage={detailQuery.error ? adminError(detailQuery.error) : auditQuery.error ? adminError(auditQuery.error) : undefined}
+            actionError={actionError}
+            approval={approval}
+            executionResult={executionResult}
+            onAssign={(assignee) => assignMutation.mutate(assignee)}
+            onStatus={(status, closeReason) => statusMutation.mutate({ status, ...(closeReason ? { closeReason } : {}) })}
+            onCreateApproval={() => approvalMutation.mutate()}
+            onDecideApproval={(decision, reason) => decisionMutation.mutate({ decision, reason })}
+            onExecute={() => executeMutation.mutate()}
+            onReply={(content) => replyMutation.mutate(content)}
+          />
+        </div>
+      )}
     </div>
   )
 }

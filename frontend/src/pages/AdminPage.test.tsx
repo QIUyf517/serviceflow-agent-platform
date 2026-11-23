@@ -112,6 +112,7 @@ type BackendOptions = {
 function installBackend(options: BackendOptions = {}) {
   let executeCalls = 0
   const operatorReplies: TicketDetail['conversation'] = []
+  const knowledgeDocuments: Array<Record<string, unknown>> = []
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const request = requestOf(input, init)
     const url = new URL(request.url)
@@ -122,6 +123,47 @@ function installBackend(options: BackendOptions = {}) {
       const offset = Number(url.searchParams.get('offset') ?? 0)
       const limit = Number(url.searchParams.get('limit') ?? 10)
       return json({ items: [TICKET], total: 21, offset, limit })
+    }
+    if (request.method === 'GET' && url.pathname === '/api/v1/merchant/knowledge-documents') {
+      return json({ merchant_id: 'merchant-demo', items: knowledgeDocuments })
+    }
+    if (request.method === 'POST' && url.pathname === '/api/v1/merchant/knowledge-documents') {
+      const body = await request.json() as Record<string, unknown>
+      const document = {
+        ...body,
+        id: 'knowledge-1',
+        merchant_id: 'merchant-demo',
+        status: 'draft',
+        content_sha256: 'sha256',
+        chunk_count: 0,
+        created_at: 1_700_000_000,
+        updated_at: 1_700_000_000,
+        published_at: null,
+        archived_at: null,
+      }
+      knowledgeDocuments.push(document)
+      return json(document, 201)
+    }
+    if (request.method === 'POST' && url.pathname.endsWith('/knowledge-1/publish')) {
+      const document = knowledgeDocuments[0]
+      if (!document) throw new Error('Knowledge draft was not created')
+      Object.assign(document, { status: 'published', chunk_count: 3, published_at: 1_700_000_010 })
+      return json(document)
+    }
+    if (request.method === 'GET' && url.pathname === '/api/v1/merchant/knowledge-documents/search') {
+      return json({
+        query: url.searchParams.get('q'),
+        method: 'keyword',
+        hits: [{
+          chunk_id: 'chunk-1',
+          section: '默认快递',
+          source: 'merchant://merchant-demo/knowledge/knowledge-1/商家物流规则',
+          version: 'merchant/1.0.0',
+          content: '普通订单通常使用中通或圆通。',
+          score: 1.25,
+          retrieval_method: 'keyword',
+        }],
+      })
     }
     if (request.method === 'GET' && url.pathname === '/api/v1/tickets/ticket-1') {
       return json({ ...DETAIL, conversation: [...DETAIL.conversation, ...operatorReplies] })
@@ -191,6 +233,24 @@ describe('AdminPage', () => {
     expect(screen.getByRole('heading', { name: '进入人工处理台' })).toBeInTheDocument()
     expect(screen.getByText(/不是生产 IAM/)).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('creates, publishes, and previews merchant knowledge', async () => {
+    const user = userEvent.setup()
+    installBackend()
+    renderAdmin()
+    await screen.findByText('TK-2026-0001')
+
+    await user.click(screen.getByRole('button', { name: '知识库' }))
+    expect(await screen.findByRole('heading', { name: '知识来源' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存草稿' }))
+    expect(await screen.findByText('店铺物流说明')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '发布' }))
+    expect(await screen.findByText('已发布')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '测试检索' }))
+    const preview = screen.getByRole('region', { name: '检索预览' })
+    expect(await within(preview).findByText('默认快递')).toBeInTheDocument()
+    expect(within(preview).getByText(/中通或圆通/)).toBeInTheDocument()
   })
 
   it('applies list filters and server pagination', async () => {

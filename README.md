@@ -2,7 +2,7 @@
 
 一个面向电商售后的全栈 AI 工程项目：模型负责理解与规划，服务端负责身份、授权、规则、确认和写入，让 Agent 不只是“会聊天”，还能在可控边界内完成真实业务操作。
 
-> 当前状态：阶段 0–5 已完成。项目使用模拟业务数据，不连接真实支付、退款或物流系统；默认 Mock/本地规则模式无需付费 LLM Key。
+> 当前状态：阶段 0–5 与商家知识库阶段已完成。项目使用模拟业务数据，不连接真实支付、退款或物流系统；默认 Mock/本地规则模式无需付费 LLM Key。
 
 ![ServiceFlow 模拟商城首屏](docs/images/storefront.png)
 
@@ -11,6 +11,7 @@
 - **完整产品闭环**：中文模拟商城、订单客服、管理后台、开发者追踪页共用 PostgreSQL 业务数据库。
 - **安全写操作**：取消和退货必须经过身份校验、具体方案、客户明确确认、执行前重检、事务写入、幂等与审计。
 - **可恢复、可接管**：LangGraph PostgreSQL checkpoint、失败恢复、工单系统和人工双向沟通。
+- **商家可维护知识**：后台录入、发布、归档 FAQ/物流说明，按商家隔离检索并保留版本与审计。
 - **可验证**：单元、集成、真实 PostgreSQL、并发和 Playwright 浏览器测试；评测结果不回避多 Agent 未胜出的事实。
 
 
@@ -58,7 +59,7 @@ LLM 可以提出意图、计划和解释，但不能自行决定客户身份、�
 启动后可访问：
 
 - `/store`：商城、身份核验、本人订单和订单独立客服线程
-- `/admin`：工单、审批、人工接管和审计
+- `/admin`：工单、审批、人工接管、商家知识库和审计
 - `/developer`：Agent 节点、工具调用、耗时、错误和业务关联
 - `http://127.0.0.1:8000/docs`：FastAPI OpenAPI
 
@@ -70,7 +71,7 @@ LLM 可以提出意图、计划和解释，但不能自行决定客户身份、�
 | 写操作安全 | 具体操作摘要、明确确认、确认绑定、过期处理、执行前状态重检 |
 | 并发安全 | PostgreSQL 事务、行锁、订单版本、数据库唯一幂等键 |
 | 故障恢复 | PostgreSQL checkpoint、执行租约、分类重试、确认后中断恢复 |
-| RAG | 政策分块、来源引用、关键词回退、pgvector 路径与注入防护 |
+| RAG | 商家知识录入/发布/撤下、H2/H3 分块、租户过滤、来源引用、关键词回退与 pgvector |
 | 人工协作 | 工单状态机、审批边界、客服与顾客双向消息、人工执行仍不能绕过客户确认 |
 | 可观测性 | `trace_id`、节点耗时、工具结果、Provider、Token 字段和审计事件 |
 | 公平评测 | 单/多 Agent 使用共享安全边界；开发集与冻结保留集分离 |
@@ -83,14 +84,14 @@ LLM 可以提出意图、计划和解释，但不能自行决定客户身份、�
 
 | 验证范围 | 实际结果 | 证据 |
 |---|---:|---|
-| 后端完整回归（含真实 PostgreSQL 随机 schema） | **269 passed，0 failed，0 skipped** | [阶段 5 报告](docs/PHASE5_REPORT.md) |
-| 前端 Vitest | **43 passed** | [阶段 4.5D 报告](docs/PHASE4_5D_REPORT.md) |
+| 后端完整回归（含真实 PostgreSQL/pgvector 随机 schema） | **273 passed，0 failed，0 skipped** | [商家知识库报告](docs/PHASE5_5_REPORT.md) |
+| 前端 Vitest | **44 passed** | [商家知识库报告](docs/PHASE5_5_REPORT.md) |
 | Chromium + FastAPI + PostgreSQL | **11 passed** | [阶段 4.5D 报告](docs/PHASE4_5D_REPORT.md) |
 | 自建可靠性轨道 | **10/10** | [评测说明](docs/EVALUATION.md) |
 | 冻结保留集：单 Agent | **51/120（42.50%）** | [保留集报告](docs/PHASE5B_HOLDOUT_REPORT.md) |
 | 冻结保留集：多 Agent V3 | **45/120（37.50%）** | [保留集报告](docs/PHASE5B_HOLDOUT_REPORT.md) |
 
-最后一次后端完整验收记录于 2026-11-22，耗时 101.68 秒；Ruff、报告一致性检查和测试 schema 清理同时通过。
+最后一次后端完整验收记录于 2026-11-23，耗时 140.03 秒；Ruff、前端 lint/typecheck/build 和临时测试 schema 清理同时通过。
 
 ### 对评测结果的解释
 
@@ -148,6 +149,26 @@ Content-Type: application/json
 
 只有客户随后明确确认，且服务端重新读取订单、锁定记录并再次通过规则校验，才会执行写入。完整演示步骤见 [3 分钟演示脚本](docs/DEMO.md)。
 
+## 商家知识导入示例
+
+商家在 `/admin` 的“知识库”工作区录入 Markdown 草稿并发布；也可以调用同一受操作员 Token 保护的 API：
+
+```http
+POST /api/v1/merchant/knowledge-documents
+X-Operator-Token: <operator-token>
+Content-Type: application/json
+
+{
+  "title": "店铺物流说明",
+  "category": "logistics",
+  "source_label": "商家物流规则",
+  "version": "1.0.0",
+  "content": "# 店铺物流说明\n\n## 默认快递\n\n普通订单通常使用中通或圆通。"
+}
+```
+
+创建结果是草稿，调用 `POST /api/v1/merchant/knowledge-documents/{id}/publish` 后才进入检索。已发布内容不可原地覆盖；归档会从关键词和 pgvector 检索中撤下。`merchant_id` 不接受客户端输入，由服务端认证配置绑定。
+
 ## 技术栈
 
 - **后端**：Python 3.12、FastAPI、Pydantic、SQLAlchemy、LangGraph
@@ -179,6 +200,7 @@ reports/           脱敏汇总结果；原始轨迹被 Git 忽略
 - 这是模拟售后平台，不执行真实支付、退款、邮件或物流操作。
 - 本地身份核验和操作员 Token 是演示机制，不是生产级 IAM。
 - 默认关键词政策检索可离线运行；向量检索和外部模型属于可选配置。
+- 商家知识库当前使用单个服务端配置的演示商家身份；生产多商家 IAM 与组织成员权限仍需接入真实身份系统。
 - 上游 τ-bench 原始数据、任务和源码不提交到本仓库；获取脚本固定 commit 并校验 SHA256。
 - 原始评测轨迹、`.env*`、数据库卷和模拟客户派生隐私输出不进入 Git。
 

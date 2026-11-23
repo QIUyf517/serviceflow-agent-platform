@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     execution_statement_timeout_ms: int = 10_000
     operator_demo_token: SecretStr | None = None
     operator_demo_id: str = "operator-demo"
+    merchant_demo_id: str = Field(
+        default="merchant-demo", pattern=r"^[A-Za-z0-9_-]{1,64}$"
+    )
     approval_ttl_seconds: int = 86_400
     agent_provider: Literal["mock", "openai_compatible"] = "mock"
     customer_triage_provider: Literal["mock", "hybrid"] = "mock"

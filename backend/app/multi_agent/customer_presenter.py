@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -127,6 +128,15 @@ def policy_answer(context: list[dict[str, Any]]) -> str:
     for hit in context:
         section = str(hit.get("section", ""))
         summary = POLICY_SUMMARIES.get(section)
+        if summary is None and str(hit.get("source", "")).startswith("merchant://"):
+            lines = [
+                re.sub(r"^[-*]\s+", "", line.strip())
+                for line in str(hit.get("excerpt", "")).splitlines()
+                if line.strip() and not line.lstrip().startswith(("#", ">"))
+            ]
+            merchant_text = " ".join(lines)
+            if merchant_text:
+                summary = merchant_text[:500]
         if summary and summary not in seen:
             summaries.append(summary)
             seen.add(summary)

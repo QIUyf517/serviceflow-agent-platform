@@ -364,6 +364,21 @@ Compose 已编排 PostgreSQL、FastAPI 与 React/Nginx，三项服务均有健�
 
 验收实测：5C 专项 **5 passed**；带现有 PostgreSQL 16 容器与随机隔离 schema 的完整后端 **269 passed、0 failed、0 skipped（101.68s）**；Ruff 通过；报告 `--check` 与只读演示通过；测试后 `phase*` schema 残留 **0**。首次受限沙箱运行卡在 asyncio loopback socket；沙箱外未设置 `TEST_DATABASE_URL` 的诊断运行得到 **254 passed、3 failed、12 skipped**，3 个失败均为测试明确拒绝缺失数据库配置。设置现有本地数据库连接后完整重跑全通过。5C 外部 LLM 调用 **0**、holdout 重跑 **0**、业务 API 变更 **0**。详见 `docs/PHASE5_REPORT.md` 和 `reports/summary.md`。
 
+## 阶段 5.5：商家知识库管理（2026-11-23）
+
+- [x] 新增服务端绑定商家身份的知识文档、生命周期审计和草稿/发布/归档状态；客户端不能提交 `merchant_id`。
+- [x] 商家后台新增知识库工作区，支持物流、FAQ、商品说明、服务公告的 Markdown 录入、编辑草稿、发布、撤下和检索预览。
+- [x] 发布内容复用 H2/H3 聚合切分和现有 PostgreSQL `policy_documents` / `policy_chunks`；向量 Provider 可用时同步写入 pgvector。
+- [x] 关键词与向量检索在数据库检索层按来源前缀隔离商家；商家说明不能成为取消/退货写操作的权威授权依据。
+- [x] 顾客端识别无订单号的快递/通常发货地问题，返回商家发布内容和来源；具体订单承运商、运单号、实际发货仓仍读取业务数据库。
+- [x] 完成 SQLite、FastAPI、真实 PostgreSQL/pgvector 随机 schema、租户隔离、不可变发布、归档撤下、前端交互和全量回归测试；更新 README、RAG 文档与阶段报告。
+
+#### 阶段 5.5 完成记录
+
+商家知识库形成可运行闭环：操作员创建的内容默认是草稿，发布后进入同一带来源 RAG 索引，已发布版本不可原地覆盖，归档后关键词与向量记录同时撤下；全部生命周期操作留有审计。当前演示认证绑定一个服务端配置的商家身份，但检索实现已按商家来源前缀过滤，测试证明两个商家不能互相召回内容。
+
+真实 PostgreSQL/pgvector 测试在随机 `phase6_knowledge_*` schema 中使用 FastEmbed 多语言 MiniLM 384 维输出索引 3 个片段并完成向量查询，随后清理 schema。最终后端完整回归 **273 passed、0 failed、0 skipped（140.03s）**，Ruff 通过；前端 **8 files、44 passed**，ESLint、TypeScript 与生产构建通过。外部 LLM 调用 **0**。详见 `docs/PHASE5_5_REPORT.md`。
+
 ## 可选阶段 6：模型微调（不阻塞主项目）
 
 - [ ] 仅从允许的训练集及有来源的成功轨迹构造 SFT/LoRA 数据。

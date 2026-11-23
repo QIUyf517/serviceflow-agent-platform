@@ -12,7 +12,7 @@ from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr
-from sqlalchemy import Engine, delete, select, text
+from sqlalchemy import Engine, delete, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -102,10 +102,26 @@ def load_policy_markdown(path: Path, *, version: str, source: str | None = None)
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise PolicyKnowledgeError("policy_source_unavailable") from exc
+    return load_policy_text(
+        raw,
+        version=version,
+        source=source or path.as_posix(),
+        fallback_title=path.name,
+    )
+
+
+def load_policy_text(
+    raw: str,
+    *,
+    version: str,
+    source: str,
+    fallback_title: str = "knowledge.md",
+) -> PolicyDocument:
+    """Parse validated Markdown text without requiring a temporary file."""
     if not raw.strip():
         raise PolicyKnowledgeError("policy_source_empty")
     lines = raw.splitlines()
-    title = path.name
+    title = fallback_title
     for line in lines:
         match = HEADING.match(line)
         if match and len(match.group(1)) == 1:
@@ -129,7 +145,7 @@ def load_policy_markdown(path: Path, *, version: str, source: str | None = None)
     if any(item.strip() for item in current_lines):
         groups.append((current_section, current_path, current_lines))
 
-    source_name = source or path.as_posix()
+    source_name = source
     source_sha = _sha256(raw)
     document_id = "policy-doc-" + _sha256(f"{source_name}\0{version}")[:20]
     chunks: list[PolicyChunk] = []
@@ -243,12 +259,23 @@ class PolicyRepository:
             rebuilt=row is not None,
         )
 
-    def chunks(self) -> list[PolicyChunk]:
+    def chunks(
+        self, *, allowed_source_prefixes: tuple[str, ...] | None = None
+    ) -> list[PolicyChunk]:
         query = (
             select(PolicyChunkRow, PolicyDocumentRow)
             .join(PolicyDocumentRow, PolicyDocumentRow.id == PolicyChunkRow.document_id)
             .order_by(PolicyDocumentRow.version, PolicyChunkRow.ordinal)
         )
+        if allowed_source_prefixes:
+            query = query.where(
+                or_(
+                    *(
+                        PolicyDocumentRow.source_path.startswith(prefix)
+                        for prefix in allowed_source_prefixes
+                    )
+                )
+            )
         with Session(self.engine) as db:
             rows = db.execute(query).all()
         return [
@@ -265,6 +292,15 @@ class PolicyRepository:
             )
             for chunk, document in rows
         ]
+
+    def delete_document(self, document_id: str) -> bool:
+        """Remove one indexed document; chunk and vector rows cascade in PostgreSQL."""
+        with Session(self.engine) as db, db.begin():
+            row = db.get(PolicyDocumentRow, document_id)
+            if row is None:
+                return False
+            db.delete(row)
+        return True
 
     def ensure_vector_schema(self, dimension: int, *, rebuild: bool = False) -> None:
         if self.engine.dialect.name != "postgresql":
@@ -341,8 +377,18 @@ class PolicyRepository:
         model: str,
         dimension: int,
         top_k: int,
+        allowed_source_prefixes: tuple[str, ...] | None = None,
     ) -> list[SearchHit]:
         schema, relation = self._vector_relation()
+        source_filter = ""
+        source_parameters: dict[str, str] = {}
+        if allowed_source_prefixes:
+            clauses = []
+            for index, prefix in enumerate(allowed_source_prefixes):
+                name = f"source_prefix_{index}"
+                clauses.append(f"d.source_path LIKE :{name}")
+                source_parameters[name] = prefix + "%"
+            source_filter = "AND (" + " OR ".join(clauses) + ") "
         statement = text(
             "SELECT c.id, c.section, c.heading_path, c.content, d.source_path, d.version, "
             "1 - (e.embedding <=> CAST(:embedding AS vector)) AS score "
@@ -350,7 +396,8 @@ class PolicyRepository:
             f'JOIN "{schema}".policy_chunks c ON c.id = e.chunk_id '
             f'JOIN "{schema}".policy_documents d ON d.id = c.document_id '
             "WHERE e.model = :model AND e.dimension = :dimension "
-            "ORDER BY e.embedding <=> CAST(:embedding AS vector) LIMIT :top_k"
+            + source_filter
+            + "ORDER BY e.embedding <=> CAST(:embedding AS vector) LIMIT :top_k"
         )
         try:
             with self.engine.connect() as conn:
@@ -361,6 +408,7 @@ class PolicyRepository:
                         "model": model,
                         "dimension": dimension,
                         "top_k": top_k,
+                        **source_parameters,
                     },
                 ).mappings()
                 return [
@@ -501,8 +549,14 @@ def _section_hints(query: str) -> set[str]:
 class KeywordRetriever:
     """Small deterministic baseline suitable for the current short policy document."""
 
-    def __init__(self, repository: PolicyRepository) -> None:
+    def __init__(
+        self,
+        repository: PolicyRepository,
+        *,
+        allowed_source_prefixes: tuple[str, ...] | None = None,
+    ) -> None:
         self.repository = repository
+        self.allowed_source_prefixes = allowed_source_prefixes
 
     def search(self, query: str, *, top_k: int = 3) -> SearchResult:
         if not query.strip():
@@ -513,7 +567,9 @@ class KeywordRetriever:
         query_terms = _query_tokens(query)
         section_hints = _section_hints(query)
         scored: list[tuple[float, PolicyChunk]] = []
-        for chunk in self.repository.chunks():
+        for chunk in self.repository.chunks(
+            allowed_source_prefixes=self.allowed_source_prefixes
+        ):
             title_terms = _tokens(" ".join(chunk.heading_path))
             content_terms = _tokens(chunk.content)
             title_overlap = len(query_terms & title_terms)
@@ -640,15 +696,22 @@ class FastEmbedProvider:
 
 
 class VectorRetriever:
-    def __init__(self, repository: PolicyRepository, provider: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        repository: PolicyRepository,
+        provider: EmbeddingProvider,
+        *,
+        allowed_source_prefixes: tuple[str, ...] | None = None,
+    ) -> None:
         self.repository = repository
         self.provider = provider
+        self.allowed_source_prefixes = allowed_source_prefixes
 
     def index(self, *, batch_size: int = 32, rebuild: bool = False) -> int:
         if batch_size < 1 or batch_size > 256:
             raise VectorUnavailableError("embedding_batch_size_invalid")
         self.repository.ensure_vector_schema(self.provider.dimension, rebuild=rebuild)
-        chunks = self.repository.chunks()
+        chunks = self.repository.chunks(allowed_source_prefixes=self.allowed_source_prefixes)
         stored = 0
         for offset in range(0, len(chunks), batch_size):
             batch = chunks[offset : offset + batch_size]
@@ -673,6 +736,7 @@ class VectorRetriever:
             model=self.provider.model,
             dimension=self.provider.dimension,
             top_k=top_k,
+            allowed_source_prefixes=self.allowed_source_prefixes,
         )
         return SearchResult(
             query=query,

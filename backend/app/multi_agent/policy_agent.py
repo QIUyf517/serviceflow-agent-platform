@@ -388,16 +388,24 @@ def build_policy_agent(
     repository.import_document(document)
     for demo_document in load_demo_documents():
         repository.import_document(demo_document)
-    keyword = KeywordRetriever(repository)
+    allowed_sources = (
+        "data/raw/tau2/",
+        "data/knowledge/",
+        f"merchant://{settings.merchant_demo_id}/knowledge/",
+    )
+    keyword = KeywordRetriever(repository, allowed_source_prefixes=allowed_sources)
     vector = None
-    if settings.policy_embedding_provider == "fastembed":
+    vector_enabled = settings.policy_retrieval_strategy in {"vector", "auto"}
+    if vector_enabled and settings.policy_embedding_provider == "fastembed":
         provider = FastEmbedProvider(
             model=settings.policy_local_embedding_model,
             dimension=settings.policy_local_embedding_dimensions,
             cache_dir=settings.policy_local_embedding_cache,
         )
-        vector = VectorRetriever(repository, provider)
-    elif settings.policy_embedding_api_key is not None:
+        vector = VectorRetriever(
+            repository, provider, allowed_source_prefixes=allowed_sources
+        )
+    elif vector_enabled and settings.policy_embedding_api_key is not None:
         provider = OpenAICompatibleEmbeddingProvider(
             model=settings.policy_embedding_model,
             dimension=settings.policy_embedding_dimensions,
@@ -405,7 +413,9 @@ def build_policy_agent(
             api_key=settings.policy_embedding_api_key,
             timeout=settings.agent_timeout_seconds,
         )
-        vector = VectorRetriever(repository, provider)
+        vector = VectorRetriever(
+            repository, provider, allowed_source_prefixes=allowed_sources
+        )
     return PolicyAgent(
         keyword,
         vector=vector,

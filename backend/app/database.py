@@ -215,6 +215,61 @@ class PolicyChunkRow(Base):
     content_sha256: Mapped[str] = mapped_column(String)
 
 
+class MerchantKnowledgeDocumentRow(Base):
+    """Merchant-owned source whose published revision is copied into the RAG index."""
+
+    __tablename__ = "merchant_knowledge_documents"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_merchant_knowledge_status",
+        ),
+        UniqueConstraint("merchant_id", "content_sha256", name="uq_merchant_knowledge_content"),
+        Index("ix_merchant_knowledge_merchant_status", "merchant_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str] = mapped_column(String)
+    category: Mapped[str] = mapped_column(String, index=True)
+    source_label: Mapped[str] = mapped_column(String)
+    version: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, index=True)
+    content: Mapped[str] = mapped_column(Text)
+    content_sha256: Mapped[str] = mapped_column(String)
+    policy_document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("policy_documents.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    created_by: Mapped[str] = mapped_column(String)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)
+    published_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archived_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class MerchantKnowledgeAuditRow(Base):
+    """Append-only audit trail for merchant knowledge lifecycle writes."""
+
+    __tablename__ = "merchant_knowledge_audit"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('draft_created', 'draft_updated', 'published', 'archived')",
+            name="ck_merchant_knowledge_audit_event",
+        ),
+        Index("ix_merchant_knowledge_audit_document", "document_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(String, index=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("merchant_knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String)
+    actor_id: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(payload_type)
+    created_at: Mapped[int] = mapped_column(Integer)
+
+
 class ConversationRow(Base):
     __tablename__ = "agent_conversations"
     session_id: Mapped[str] = mapped_column(ForeignKey("service_sessions.id"), primary_key=True)
