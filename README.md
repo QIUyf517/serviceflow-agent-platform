@@ -13,7 +13,6 @@
 - **可恢复、可接管**：LangGraph PostgreSQL checkpoint、失败恢复、工单系统和人工双向沟通。
 - **可验证**：单元、集成、真实 PostgreSQL、并发和 Playwright 浏览器测试；评测结果不回避多 Agent 未胜出的事实。
 
-适合作为 **AI 应用开发、Python 后端、Agent 工程或全栈实习** 方向的作品集。它重点展示工程约束与验证，不把“用了多 Agent”本身当作成果。
 
 ## 它和普通聊天机器人有什么不同
 
