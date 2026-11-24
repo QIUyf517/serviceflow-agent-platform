@@ -40,10 +40,8 @@ REASON = {"type": "string", "enum": ["no longer needed", "ordered by mistake"]}
 ITEM_IDS = {"type": "array", "items": STRING, "minItems": 1}
 ADDRESS = {
     "type": "object",
-    "properties": {
-        key: STRING for key in ("address1", "address2", "city", "state", "country", "zip")
-    },
-    "required": ["address1", "address2", "city", "state", "country", "zip"],
+    "properties": {key: STRING for key in ("address1", "address2", "city", "state", "country")},
+    "required": ["address1", "city", "state", "country"],
     "additionalProperties": False,
 }
 PROPOSALS = {
@@ -85,7 +83,8 @@ TOOLS = [
     _tool(
         "propose_modify_address",
         "Validate a pending order shipping address change. "
-        "Supply the complete address object; this only creates a proposal.",
+        "Supply country, state, city and address1; address2 is optional and no postal code is "
+        "required. This only creates a proposal.",
         {"order_id": ORDER_ID, "address": ADDRESS},
         ["order_id", "address"],
     ),

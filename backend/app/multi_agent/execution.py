@@ -1,4 +1,4 @@
-"""Trusted cancel/return execution boundary, independent from any LLM."""
+"""Trusted after-sales execution boundary, independent from any LLM."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from app.multi_agent.models import (
 from app.service import Action, BusinessError, RetailService
 
 Decision = Literal["confirm", "reject"]
-ExecutableAction = Literal["cancel", "return"]
+ExecutableAction = Literal["cancel", "return", "modify_address"]
 
 RETRYABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03", "57014", "08000", "08003", "08006"})
 
@@ -147,6 +147,13 @@ class ExecutionService:
                 f"items={quantities} "
                 f"refund_method={request.arguments.get('payment_method_id', '')}"
             )
+        elif request.action == "modify_address":
+            detail = "address=" + json.dumps(
+                request.arguments.get("address", {}),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         else:
             raise BusinessError("execution_action_not_allowed", 403)
         return (
@@ -156,7 +163,11 @@ class ExecutionService:
 
     @staticmethod
     def _rejection_text(request: ExecutionRequestRow) -> str:
-        label = "取消" if request.action == "cancel" else "退货申请"
+        label = {
+            "cancel": "取消",
+            "return": "退货申请",
+            "modify_address": "修改收货地址",
+        }.get(request.action, "订单操作")
         return (
             f"拒绝{label} {request.order_id}，"
             f"方案：{request.proposal_id}，版本：{request.proposal_version}"
@@ -230,7 +241,7 @@ class ExecutionService:
         parameters = {
             key: value
             for key, value in request.arguments.items()
-            if key not in {"kind", "order_id", "item_ids", "new_item_ids", "address"}
+            if key not in {"kind", "order_id", "item_ids", "new_item_ids"}
             and value not in (None, [], {})
         }
         if request.action == "cancel":
@@ -248,6 +259,19 @@ class ExecutionService:
                 f"退款途径：{parameters.get('payment_method_id')}；"
                 "订单状态将变为已申请退货，尚未实际退款"
             )
+        elif request.action == "modify_address":
+            address = parameters.get("address") or {}
+            if not isinstance(address, dict):
+                raise BusinessError("execution_request_corrupt", 409)
+            lines = [
+                str(address.get("country", "")),
+                str(address.get("state", "")),
+                str(address.get("city", "")),
+                str(address.get("address1", "")),
+                str(address.get("address2", "")),
+            ]
+            display_address = " ".join(value for value in lines if value)
+            summary = f"将订单 {request.order_id} 的收货地址修改为：{display_address}"
         else:
             raise BusinessError("execution_action_not_allowed", 403)
         return ExecutionRequestSummary(
@@ -291,10 +315,10 @@ class ExecutionService:
         eligibility: EligibilityResult,
         idempotency_key: str,
     ) -> ExecutionRequestSummary:
-        """Persist an eligible cancel/return request without changing the order."""
+        """Persist an eligible after-sales request without changing the order."""
         key = self._validate_idempotency_key(idempotency_key)
         if (
-            proposal.action_type not in {"cancel", "return"}
+            proposal.action_type not in {"cancel", "return", "modify_address"}
             or proposal.order_id is None
             or proposal.status != "pending_confirmation"
             or not proposal.validated
@@ -307,6 +331,7 @@ class ExecutionService:
         expected_parameters = {
             "cancel": {"reason"},
             "return": {"item_quantities", "payment_method_id"},
+            "modify_address": {"address"},
         }[proposal.action_type]
         if set(proposal.proposed_parameters) != expected_parameters:
             raise BusinessError("proposal_parameters_invalid")
@@ -408,6 +433,17 @@ class ExecutionService:
         idempotency_key: str,
     ) -> ExecutionRequestSummary:
         if proposal.action_type != "return":
+            raise BusinessError("proposal_not_executable")
+        return self.prepare_action(sid, proposal, eligibility, idempotency_key)
+
+    def prepare_address_change(
+        self,
+        sid: str,
+        proposal: ResolutionProposal,
+        eligibility: EligibilityResult,
+        idempotency_key: str,
+    ) -> ExecutionRequestSummary:
+        if proposal.action_type != "modify_address":
             raise BusinessError("proposal_not_executable")
         return self.prepare_action(sid, proposal, eligibility, idempotency_key)
 
@@ -855,9 +891,11 @@ class ExecutionService:
                         or request.lease_expires_at < int(self.clock())
                     ):
                         raise BusinessError("execution_lease_lost", 409)
-                    if request.action not in {"cancel", "return"} or not self._binding_valid(
-                        request
-                    ):
+                    if request.action not in {
+                        "cancel",
+                        "return",
+                        "modify_address",
+                    } or not self._binding_valid(request):
                         raise BusinessError("proposal_binding_invalid", 409)
                     confirmation = db.scalar(
                         select(ConfirmationRecordRow)

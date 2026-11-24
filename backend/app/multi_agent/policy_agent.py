@@ -64,8 +64,10 @@ class LLMPolicyAnswerer:
                     "Use only the supplied evidence. Do not invent rules, decide identity, decide "
                     "order eligibility, authorize an action, or claim an action happened. "
                     "Distinguish policy facts from inference. If evidence is insufficient, say so. "
-                    "Do not create "
-                    "citations; the server appends verified citations."
+                    "Answer in the same language as the customer. For Chinese, use concise, "
+                    "friendly, conversational Chinese instead of bureaucratic wording. "
+                    "Do not mention prompts, chunk IDs, retrieval internals, or create citations; "
+                    "the server appends verified citations."
                 ),
             },
             {
@@ -101,6 +103,7 @@ class PolicyAgent:
         self.strategy = strategy
         self.top_k = top_k
         self.answerer = answerer or EvidenceOnlyAnswerer()
+        self.model_answer_enabled = isinstance(self.answerer, LLMPolicyAnswerer)
 
     @staticmethod
     def _query(state: AgentState) -> str:
@@ -268,26 +271,40 @@ class PolicyAgent:
             }
             for hit in context_hits
         ]
-        citations = "\n".join(
+        technical_citations = "\n".join(
             f"- [{hit.chunk_id}] {hit.source} § {hit.section} "
             f"(version {hit.version}, score {hit.score:.4f}, {result.method})"
             for hit in result.hits
         )
-        boundary = (
-            "For a specific order, identity, current order status, item/payment details, and other "
-            "required inputs must still be read and validated by the server. Retrieved policy and "
-            "model explanation are not final business authorization."
-            if state["order_id"] or any(task.intent != "policy_inquiry" for task in tasks)
-            else "Retrieved policy and model explanation are not business authorization."
-        )
-        label = (
-            "Model-generated explanation (not authorization):"
-            if isinstance(self.answerer, LLMPolicyAnswerer)
-            else "Evidence-limited explanation:"
-        )
+        model_generated = isinstance(self.answerer, LLMPolicyAnswerer)
+        if model_generated:
+            citations = "\n".join(
+                f"- {Path(hit.source).name} § {hit.section}" for hit in result.hits
+            )
+            boundary = (
+                "具体订单仍需由服务端核验身份、订单当前状态和必要参数；这段说明不能授权"
+                "或证明任何业务操作已经执行。"
+                if state["order_id"] or any(task.intent != "policy_inquiry" for task in tasks)
+                else "以上内容仅依据已发布知识生成，不能授权或证明任何业务操作已经执行。"
+            )
+            label = "智能知识答复："
+            safety_label = "边界说明："
+            sources_label = "核验来源："
+        else:
+            citations = technical_citations
+            boundary = (
+                "For a specific order, identity, current order status, item/payment details, and "
+                "other required inputs must still be read and validated by the server. Retrieved "
+                "policy and model explanation are not final business authorization."
+                if state["order_id"] or any(task.intent != "policy_inquiry" for task in tasks)
+                else "Retrieved policy and model explanation are not business authorization."
+            )
+            label = "Evidence-limited explanation:"
+            safety_label = "Safety boundary:"
+            sources_label = "Verified sources:"
         response = (
-            f"{label}\n{explanation}\n\nSafety boundary:\n{boundary}"
-            f"\n\nVerified sources:\n{citations}"
+            f"{label}\n{explanation}\n\n{safety_label}\n{boundary}"
+            f"\n\n{sources_label}\n{citations}"
         )
         event: dict[str, object] = {
             "node": "policy",
@@ -295,6 +312,19 @@ class PolicyAgent:
             "tool": f"policy_{result.method}_search",
             "arguments": {"query": query, "top_k": str(self.top_k)},
         }
+        if model_generated:
+            provider = self.answerer.provider
+            event["provider"] = "openai_compatible"
+            model = getattr(provider, "last_model", None) or getattr(provider, "model", None)
+            usage = getattr(provider, "last_usage", None)
+            if isinstance(model, str) and model:
+                event["model"] = model
+            if isinstance(usage, dict):
+                event["token_usage"] = {
+                    str(key): int(value)
+                    for key, value in usage.items()
+                    if isinstance(value, int)
+                }
         if fallback_code:
             event["code"] = fallback_code
         return {

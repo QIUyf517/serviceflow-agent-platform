@@ -72,6 +72,9 @@ class TraceEvent(TypedDict):
     tool: NotRequired[StrictStr]
     arguments: NotRequired[dict[StrictStr, StrictStr]]
     code: NotRequired[StrictStr]
+    provider: NotRequired[StrictStr]
+    model: NotRequired[StrictStr]
+    token_usage: NotRequired[dict[StrictStr, StrictInt]]
 
 
 class AgentState(TypedDict):

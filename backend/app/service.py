@@ -380,14 +380,25 @@ class RetailService:
             order["status"] = "cancelled"
             order["cancel_reason"] = action.reason
         elif kind == "modify_address":
-            keys = {"address1", "address2", "city", "state", "country", "zip"}
+            required_keys = {"address1", "city", "state", "country"}
+            optional_keys = {"address2", "zip"}
             if (
                 not action.address
-                or set(action.address) != keys
+                or not required_keys.issubset(action.address)
+                or set(action.address) - required_keys - optional_keys
                 or not all(isinstance(v, str) for v in action.address.values())
+                or any(not action.address[key].strip() for key in required_keys)
             ):
                 raise BusinessError("address_invalid")
-            order["address"] = action.address
+            order["address"] = {
+                "address1": action.address["address1"].strip(),
+                "address2": action.address.get("address2", "").strip(),
+                "city": action.address["city"].strip(),
+                "state": action.address["state"].strip(),
+                "country": action.address["country"].strip(),
+            }
+            if action.address.get("zip", "").strip():
+                order["address"]["zip"] = action.address["zip"].strip()
         elif kind == "modify_payment":
             method = self._method(user, action.payment_method_id)
             history = order["payment_history"]

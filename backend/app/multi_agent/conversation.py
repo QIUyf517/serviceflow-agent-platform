@@ -1,4 +1,4 @@
-"""Coherent multi-turn cancel/return conversation over specialized agents."""
+"""Coherent multi-turn after-sales conversation over specialized agents."""
 
 from __future__ import annotations
 
@@ -62,6 +62,10 @@ OUT_OF_SCOPE = re.compile(
     r"|\b(?:sing (?:me )?a song|tell (?:me )?a joke|write code|weather forecast|stock tip)\b",
     re.I,
 )
+GREETING = re.compile(
+    r"^(?:你好|您好|嗨|哈喽|hello|hi|hey)[!！,.，。?？\s]*$",
+    re.I,
+)
 HUMAN_SUGGESTION = "如需人工客服，请回复“转人工”。"
 UNRESOLVED_NOTICE = "智能客服当前无法解决这个问题。"
 WRITE_INTENTS = {"cancel_order", "modify_order", "return_order", "exchange_order"}
@@ -93,6 +97,10 @@ def _rehydrate_policy_context(service: RetailService, state: AgentState) -> list
 
 
 def _metrics(began: float, trace: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict:
+    model_event = next(
+        (event for event in reversed(trace) if isinstance(event.get("provider"), str)),
+        None,
+    )
     return {
         "elapsed_ms": max(0, int((perf_counter() - began) * 1000)),
         "node_count": len(trace),
@@ -107,10 +115,10 @@ def _metrics(began: float, trace: list[dict[str, Any]], tools: list[dict[str, An
             }
             for event in trace
         ],
-        "provider": "mock_local",
-        "model": "deterministic-v1",
+        "provider": model_event["provider"] if model_event else "mock_local",
+        "model": model_event.get("model") if model_event else "deterministic-v1",
         "run_config": {"temperature": None, "seed": None},
-        "token_usage": None,
+        "token_usage": model_event.get("token_usage") if model_event else None,
     }
 
 
@@ -258,9 +266,14 @@ def _consultation_route(message: str, outcome: dict[str, Any]) -> str:
     return "after_sales"
 
 
-def _customer_response(outcome: dict[str, Any], route: str) -> str:
+def _customer_response(
+    outcome: dict[str, Any], route: str, *, model_policy_answer: bool = False
+) -> str:
     status = outcome.get("task_status")
     if route == "faq_policy" and outcome.get("policy_context"):
+        generated = outcome.get("final_response")
+        if model_policy_answer and isinstance(generated, str) and generated.strip():
+            return generated
         return policy_answer(outcome["policy_context"])
     if route in {"product", "order_logistics"} and outcome.get("order_data"):
         answer = query_answer(outcome["order_data"])
@@ -270,10 +283,20 @@ def _customer_response(outcome: dict[str, Any], route: str) -> str:
     if status in {"clarification", "needs_clarification", "triage_error"}:
         missing = outcome.get("missing_information") or []
         if missing:
+            triage = outcome.get("triage") or {}
+            if (
+                "order_id" in missing
+                and triage.get("requested_action") == "get_order_logistics"
+            ):
+                return (
+                    "这是具体订单的物流问题，需要先确定订单。请提供订单号，或在“我的订单”"
+                    "中打开对应订单的客服窗口。通用发货说明不能代表该订单的实际承运商或"
+                    "发货仓；未执行任何订单操作。"
+                )
             return clarification(missing)
         return (
             UNRESOLVED_NOTICE + "我还无法确定你要咨询的内容。请说明是商品、政策、订单物流，"
-            "还是取消/退货需求。 " + HUMAN_SUGGESTION
+            "还是取消、退货或修改收货地址的需求。 " + HUMAN_SUGGESTION
         )
     if route == "out_of_scope":
         return (
@@ -283,7 +306,7 @@ def _customer_response(outcome: dict[str, Any], route: str) -> str:
     if route == "unclear":
         return (
             UNRESOLVED_NOTICE + "我还无法确定你的诉求。请说明是咨询商品/政策、查订单/物流，"
-            "还是申请取消/退货。 " + HUMAN_SUGGESTION
+            "还是申请取消、退货或修改收货地址。 " + HUMAN_SUGGESTION
         )
     if route == "evidence_insufficient":
         return (
@@ -325,6 +348,19 @@ def _same_action(
         return "cancel_order" in triage.intents and triage.extracted_parameters.get(
             "reason"
         ) == request.proposed_parameters.get("reason")
+    if request.action_type == "modify_address":
+        proposed_address = request.proposed_parameters.get("address")
+        if not isinstance(proposed_address, dict):
+            return False
+        repeated_address = {
+            key: triage.extracted_parameters.get(key, "")
+            for key in ("address1", "address2", "city", "state", "country")
+        }
+        return (
+            "modify_order" in triage.intents
+            and triage.extracted_parameters.get("modification_type") == "address"
+            and repeated_address == proposed_address
+        )
     return (
         "return_order" in triage.intents
         and triage.extracted_parameters.get("item_quantities")
@@ -404,7 +440,11 @@ def _store_rejection(
             elif task.target_agent == "executor":
                 task.status = "blocked"
                 task.required_inputs = ["confirmation_rejected"]
-        operation = "取消订单" if request.action_type == "cancel" else "退货申请"
+        operation = {
+            "cancel": "取消订单",
+            "return": "退货申请",
+            "modify_address": "修改收货地址",
+        }.get(request.action_type, "订单操作")
         response = f"已拒绝{operation} {request.order_id}；订单未被修改。"
         updated = apply_agent_update(
             state,
@@ -724,6 +764,20 @@ def run_after_sales_conversation(
                 ticket=ticket,
             )
         )
+    if active is None and GREETING.fullmatch(phrase):
+        current_route = "greeting"
+        return finish(
+            _response(
+                began,
+                task_status="greeting",
+                final_response=(
+                    "你好呀 😊 有什么需要吗？你可以问我商品、发货或售后问题，也可以查询"
+                    "自己的订单。"
+                ),
+                trace=[],
+                tool_results=[],
+            )
+        )
     if active is None and re.search(
         r"(?:^|：)\s*(?:不想取消了?|不取消了?|算了不取消了?)\s*[。！! ]*$", phrase
     ):
@@ -792,12 +846,18 @@ def run_after_sales_conversation(
                     began,
                     task_status=result["task_status"],
                     final_response=(
-                        f"订单 {result['execution_result']['order_id']} 已完成处理，当前状态："
-                        f"{status_label(result['execution_result']['after_status'])}。"
-                        + (
-                            "这只是本地退货申请，尚未发生真实退款。"
-                            if request.action_type == "return"
-                            else ""
+                        (
+                            f"订单 {result['execution_result']['order_id']} 的收货地址已修改。"
+                            if request.action_type == "modify_address"
+                            else (
+                                f"订单 {result['execution_result']['order_id']} 已完成处理，当前状态："
+                                f"{status_label(result['execution_result']['after_status'])}。"
+                                + (
+                                    "这只是本地退货申请，尚未发生真实退款。"
+                                    if request.action_type == "return"
+                                    else ""
+                                )
+                            )
                         )
                         if result["execution_result"]
                         and result["execution_result"]["status"] == "succeeded"
@@ -882,7 +942,7 @@ def run_after_sales_conversation(
     if (
         outcome["task_status"] == "proposal_ready"
         and proposal is not None
-        and proposal["action_type"] in {"cancel", "return"}
+        and proposal["action_type"] in {"cancel", "return", "modify_address"}
         and eligibility is not None
     ):
         with store.lock:
@@ -924,7 +984,11 @@ def run_after_sales_conversation(
                 task_plan=[task.model_dump() for task in state["task_plan"]],
             )
         )
-    response = _customer_response(outcome, current_route)
+    response = _customer_response(
+        outcome,
+        current_route,
+        model_policy_answer=policy_agent.model_answer_enabled,
+    )
     return finish(
         _response(
             began,

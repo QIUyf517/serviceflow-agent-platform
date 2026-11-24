@@ -3,11 +3,13 @@ from copy import deepcopy
 import pytest
 from app.config import Settings
 from app.database import MessageRow, OrderRow, ProductRow, TicketRow
+from app.llm import ModelReply
 from app.multi_agent.content_safety import ContentSafetyChecker
 from app.multi_agent.conversation import run_after_sales_conversation
 from app.multi_agent.execution import ExecutionService
-from app.multi_agent.policy_agent import build_policy_agent
+from app.multi_agent.policy_agent import LLMPolicyAnswerer, build_policy_agent
 from app.multi_agent.workflow import SessionStateStore
+from app.support_threads import SupportThreadService
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -107,6 +109,91 @@ def test_policy_faq_uses_retrieved_sources_and_chinese_projection(service):
     assert "来源" in result["final_response"]
     assert "policy.md" in result["final_response"]
     assert result["policy_context"] if "policy_context" in result else True
+
+
+def test_customer_policy_answer_uses_enabled_llm_expression_layer(service):
+    class FriendlyProvider:
+        def complete(self, messages, tools):
+            assert tools == []
+            assert "same language" in messages[0]["content"]
+            return ModelReply(content="可以的，我先帮你确认一下取消订单需要满足哪些条件。")
+
+    policy = build_policy_agent(
+        service.engine,
+        Settings(
+            _env_file=None,
+            agent_provider="openai_compatible",
+            policy_retrieval_strategy="keyword",
+        ),
+        answerer=LLMPolicyAnswerer(FriendlyProvider()),
+    )
+    result = run_after_sales_conversation(
+        service,
+        ExecutionService(service.engine),
+        verified(service),
+        "取消订单需要什么条件？",
+        SessionStateStore(),
+        policy,
+    )
+
+    assert result["consultation_route"] == "faq_policy"
+    assert result["final_response"].startswith("智能知识答复：")
+    assert "可以的，我先帮你确认一下" in result["final_response"]
+    assert "核验来源" in result["final_response"]
+    assert "chunk_id" not in result["final_response"]
+    assert result["metrics"]["provider"] == "openai_compatible"
+
+
+def test_greeting_and_unscoped_order_shipping_receive_useful_guidance(service):
+    sid = verified(service)
+    store = SessionStateStore()
+
+    greeting = turn(service, sid, "你好", store)
+    assert greeting["task_status"] == "greeting"
+    assert greeting["consultation_route"] == "greeting"
+    assert "你好呀 😊" in greeting["final_response"]
+    assert "有什么需要吗" in greeting["final_response"]
+    assert "无法解决" not in greeting["final_response"]
+
+    shipping = turn(service, sid, "这个订单从哪里发货", store)
+    assert shipping["task_status"] == "clarification"
+    assert shipping["consultation_route"] == "unclear"
+    assert "具体订单的物流问题" in shipping["final_response"]
+    assert "我的订单" in shipping["final_response"]
+    assert "通用发货说明不能代表" in shipping["final_response"]
+    assert "无法解决" not in shipping["final_response"]
+
+
+def test_short_shipping_followup_in_order_thread_stays_on_business_data(service):
+    sid = verified(service)
+    store = SessionStateStore()
+    thread = SupportThreadService(service.engine).resolve(sid, "o")
+
+    first = run_after_sales_conversation(
+        service,
+        ExecutionService(service.engine),
+        sid,
+        "帮我查询这个订单从哪里发货",
+        store,
+        policy_for(service),
+        thread=thread,
+    )
+    followup = run_after_sales_conversation(
+        service,
+        ExecutionService(service.engine),
+        sid,
+        "哪里发货",
+        store,
+        policy_for(service),
+        thread=thread,
+    )
+
+    assert first["consultation_route"] == "order_logistics"
+    assert followup["consultation_route"] == "order_logistics"
+    assert followup["thread_order_id"] == "o"
+    assert "尚无实际承运商、运单或发货仓记录" in followup["final_response"]
+    assert "通用发货规则" in followup["final_response"]
+    assert "演示仓" not in followup["final_response"]
 
 
 def test_product_consultation_reads_current_business_database(service):

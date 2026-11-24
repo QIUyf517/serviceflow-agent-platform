@@ -27,6 +27,13 @@ function statusLabel(status: string): string {
   return labels[status] ?? status
 }
 
+function addressLabel(address: Record<string, string>): string {
+  return ['country', 'state', 'city', 'address1', 'address2']
+    .map((key) => address[key])
+    .filter(Boolean)
+    .join(' ')
+}
+
 export function OrdersPanel({
   orders,
   selectedOrder,
@@ -96,6 +103,11 @@ export function OrdersPanel({
               </li>
             ))}
           </ul>
+          {selectedOrder.address ? (
+            <p className="tracking">
+              收货地址：{addressLabel(selectedOrder.address)}
+            </p>
+          ) : null}
           {selectedOrder.fulfillments?.length ? (
             <p className="tracking">
               物流：{selectedOrder.fulfillments.flatMap((item) => item.tracking_id).join('、')}

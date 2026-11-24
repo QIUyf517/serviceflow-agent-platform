@@ -659,7 +659,10 @@ def run_turn(
 def _execution_tasks(existing: list[TaskPlan], task_id: str, action_type: str) -> list[TaskPlan]:
     tasks = [task.model_copy(deep=True) for task in existing]
     if not tasks:
-        intent = "return_order" if action_type == "return" else "cancel_order"
+        intent = {
+            "return": "return_order",
+            "modify_address": "modify_order",
+        }.get(action_type, "cancel_order")
         prefix = action_type
         tasks = [
             TaskPlan(
@@ -787,6 +790,12 @@ def build_execution_workflow(
                     f"Return request for order {result.order_id} was registered. "
                     f"Database status is {result.after_status}; row version is "
                     f"{result.row_version}. No real-world refund has been disbursed."
+                )
+            elif result.action_type == "modify_address":
+                response = (
+                    f"The shipping address for order {result.order_id} was updated successfully. "
+                    f"Database status is {result.after_status}; row version is "
+                    f"{result.row_version}."
                 )
             else:
                 response = (

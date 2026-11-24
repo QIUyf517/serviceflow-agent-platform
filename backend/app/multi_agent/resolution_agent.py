@@ -125,6 +125,7 @@ class DeterministicResolutionGenerator:
         values = triage.extracted_parameters
         action_type: ActionType
         parameters: dict[str, Any]
+        address_missing: list[str] = []
         if task.intent == "cancel_order":
             action_type = "cancel"
             reason = _cancel_reason(values.get("reason"))
@@ -153,13 +154,19 @@ class DeterministicResolutionGenerator:
                 "items": "modify_items",
             }.get(kind, "modify_items")
             if action_type == "modify_address":
-                parameters = {
-                    "address": {
-                        key: values[key]
-                        for key in ("address1", "address2", "city", "state", "country", "zip")
-                        if key in values
+                required_address = ("country", "state", "city", "address1")
+                address_missing = [key for key in required_address if not values.get(key)]
+                parameters = {}
+                if not address_missing:
+                    parameters = {
+                        "address": {
+                            "address1": values["address1"],
+                            "address2": values.get("address2", ""),
+                            "city": values["city"],
+                            "state": values["state"],
+                            "country": values["country"],
+                        }
                     }
-                }
             elif action_type == "modify_payment":
                 parameters = {"payment_method_id": values.get("payment_method_id")}
             else:
@@ -172,6 +179,8 @@ class DeterministicResolutionGenerator:
             key: value for key, value in parameters.items() if value not in (None, [], {})
         }
         missing = sorted(REQUIRED_PARAMETERS[action_type] - parameters.keys())
+        if action_type == "modify_address" and address_missing:
+            missing = address_missing
         if task.intent == "modify_order" and "modification_type" not in values:
             missing.insert(0, "modification_type")
         expected = "pending" if action_type in {

@@ -217,6 +217,25 @@ def test_two_orders_get_distinct_threads_and_isolated_messages(two_order_service
         app.dependency_overrides.clear()
 
 
+def test_short_shipping_followup_stays_bound_to_the_order_thread(
+    two_order_service, monkeypatch
+):
+    client = configured_client(two_order_service, monkeypatch)
+    try:
+        sid = verified_session(client)
+        first = chat(client, sid, "帮我查询这个订单从哪里发货", order_id="o").json()
+        followup = chat(client, sid, "哪里发货", order_id="o").json()
+
+        assert first["consultation_route"] == "order_logistics"
+        assert followup["consultation_route"] == "order_logistics"
+        assert followup["thread_order_id"] == "o"
+        assert "尚无实际承运商、运单或发货仓记录" in followup["final_response"]
+        assert "通用发货规则" in followup["final_response"]
+        assert "演示仓" not in followup["final_response"]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_operator_console_and_customer_window_share_one_order_thread(
     two_order_service, monkeypatch
 ):

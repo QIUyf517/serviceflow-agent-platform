@@ -185,7 +185,9 @@ def query_answer(order_data: dict[str, dict[str, Any]]) -> str:
             else:
                 parts.append(
                     f"订单 {result.get('order_id')} 状态为{status_label(result.get('status'))}，"
-                    "当前数据库中暂无可用物流信息。"
+                    "当前业务数据库中尚无实际承运商、运单或发货仓记录，因此无法确定这笔"
+                    "订单从哪里发货。若想了解店铺的通用发货规则，可以问“你们一般从哪里"
+                    "发货”。"
                 )
         elif kind in {"order", "items"}:
             order = result.get("order") or result
@@ -229,10 +231,24 @@ MISSING_LABELS = {
     "reason": "取消原因（不再需要或误下单）",
     "item_quantities": "退货商品项与数量",
     "payment_method_id": "退款途径标识",
+    "modification_type": "要修改的内容（当前支持收货地址）",
+    "address": "新收货地址",
+    "country": "国家",
+    "state": "省/州",
+    "city": "城市",
+    "address1": "详细地址",
+    "address2": "地址补充（可选）",
 }
 
 
 def clarification(missing: list[str]) -> str:
     labels = [MISSING_LABELS.get(item, "更具体的需求信息") for item in missing]
     labels = list(dict.fromkeys(labels))
-    return "为了安全处理，请补充" + "、".join(labels) + "。未执行任何订单写操作。"
+    response = "为了安全处理，请补充" + "、".join(labels) + "。"
+    address_fields = {"address", "country", "state", "city", "address1", "address2"}
+    if address_fields.intersection(missing):
+        response += (
+            "可按“国家：中国，省/州：广东省，城市：深圳市，"
+            "详细地址：南山区示例路 1 号”的格式发送，不需要邮编。"
+        )
+    return response + "未执行任何订单写操作。"

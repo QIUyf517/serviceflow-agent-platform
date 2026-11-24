@@ -160,7 +160,7 @@ class ExecutionRequestSummary(BaseModel):
     proposal_version: int
     proposal_digest: str
     order_id: str
-    action_type: Literal["cancel", "return"]
+    action_type: Literal["cancel", "return", "modify_address"]
     proposed_parameters: dict[str, JsonValue]
     summary: str
     status: Literal[
@@ -186,7 +186,7 @@ class ConfirmationRecord(BaseModel):
     proposal_version: int
     proposal_digest: str
     order_id: str
-    action_type: Literal["cancel", "return"]
+    action_type: Literal["cancel", "return", "modify_address"]
     decision: Literal["confirm", "reject"]
     status: Literal["valid", "rejected", "expired", "consumed", "invalidated"]
     created_at: int
@@ -200,7 +200,7 @@ class ExecutionResult(BaseModel):
     proposal_id: str
     confirmation_id: str
     status: Literal["succeeded"]
-    action_type: Literal["cancel", "return"]
+    action_type: Literal["cancel", "return", "modify_address"]
     order_id: str
     before_status: str
     after_status: str

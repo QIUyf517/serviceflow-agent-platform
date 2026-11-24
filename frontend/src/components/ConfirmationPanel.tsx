@@ -12,14 +12,23 @@ interface ConfirmationPanelProps {
 }
 
 function actionLabel(action: PendingConfirmation['action_type']): string {
-  return action === 'cancel' ? '取消订单' : '提交退货申请'
+  if (action === 'cancel') return '取消订单'
+  if (action === 'return') return '提交退货申请'
+  return '修改收货地址'
 }
 
 function valueLabel(value: unknown): string {
   if (value === 'ordered by mistake') return '下错单'
   if (value === 'no longer needed') return '不再需要'
   if (Array.isArray(value)) return value.join('、')
-  if (value && typeof value === 'object') return JSON.stringify(value)
+  if (value && typeof value === 'object') {
+    const address = value as Record<string, unknown>
+    const addressParts = ['country', 'state', 'city', 'address1', 'address2']
+      .map((key) => address[key])
+      .filter((part) => typeof part === 'string' && part.trim())
+    if (addressParts.length) return addressParts.join(' ')
+    return JSON.stringify(value)
+  }
   return String(value)
 }
 
@@ -33,7 +42,9 @@ export function ConfirmationPanel({
   if (result?.status === 'succeeded') {
     return (
       <StateNotice kind="success" title="服务端已执行成功">
-        {result.order_id}：{orderStatusLabel(result.before_status)} → {orderStatusLabel(result.after_status)}
+        {result.action_type === 'modify_address'
+          ? `${result.order_id}：收货地址已修改`
+          : `${result.order_id}：${orderStatusLabel(result.before_status)} → ${orderStatusLabel(result.after_status)}`}
         {result.idempotent_replay ? '（重复请求复用了原结果）' : ''}
       </StateNotice>
     )
@@ -69,7 +80,7 @@ export function ConfirmationPanel({
         </div>
         {Object.entries(request.proposed_parameters).map(([key, value]) => (
           <div key={key}>
-            <dt>{key === 'reason' ? '原因' : key === 'item_quantities' ? '商品项与数量' : key === 'payment_method_id' ? '退款途径' : '操作参数'}</dt>
+            <dt>{key === 'reason' ? '原因' : key === 'item_quantities' ? '商品项与数量' : key === 'payment_method_id' ? '退款途径' : key === 'address' ? '新收货地址' : '操作参数'}</dt>
             <dd>{valueLabel(value)}</dd>
           </div>
         ))}

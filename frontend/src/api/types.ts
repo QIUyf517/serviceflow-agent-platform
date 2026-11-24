@@ -61,6 +61,7 @@ export interface Fulfillment {
 export interface Order {
   order_id: string
   status: string
+  address?: Record<string, string>
   items: OrderItem[]
   fulfillments?: Fulfillment[]
   payment_history?: Array<Record<string, unknown>>
@@ -128,7 +129,7 @@ export interface PendingConfirmation {
   proposal_id: string
   proposal_version: number
   order_id: string
-  action_type: 'cancel' | 'return'
+  action_type: 'cancel' | 'return' | 'modify_address'
   proposed_parameters: Record<string, unknown>
   summary: string
   status:
@@ -149,7 +150,7 @@ export interface ExecutionResult {
   proposal_id: string
   confirmation_id: string
   status: 'succeeded'
-  action_type: 'cancel' | 'return'
+  action_type: 'cancel' | 'return' | 'modify_address'
   order_id: string
   before_status: string
   after_status: string
@@ -220,6 +221,7 @@ export interface ConversationResponse {
     | 'evidence_insufficient'
     | 'data_unavailable'
     | 'human_handoff'
+    | 'greeting'
   safety?: {
     allowed: boolean
     category: string

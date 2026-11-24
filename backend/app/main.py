@@ -667,21 +667,35 @@ def multi_agent_chat(
     execution: ExecutionService = Depends(get_execution_service),
     threads: SupportThreadService = Depends(get_thread_service),
 ) -> dict[str, Any]:
-    """Natural-language cancel/return flow; confirmation parsing is deterministic."""
+    """Natural-language after-sales flow; confirmation parsing is deterministic."""
     from app.llm import OpenAICompatibleProvider, ProviderError
     from app.multi_agent.conversation import run_after_sales_conversation
-    from app.multi_agent.policy_agent import build_policy_agent
+    from app.multi_agent.policy_agent import LLMPolicyAnswerer, build_policy_agent
     from app.multi_agent.triage import HybridTriage, MockTriage
 
     customer_settings = Settings()
     triage_provider = MockTriage()
-    if customer_settings.customer_triage_provider == "hybrid":
+    provider = None
+    if (
+        customer_settings.customer_triage_provider == "hybrid"
+        or customer_settings.agent_provider == "openai_compatible"
+    ):
         try:
-            triage_provider = HybridTriage(OpenAICompatibleProvider(customer_settings))
+            provider = OpenAICompatibleProvider(customer_settings)
         except ProviderError:
             pass
-    local_settings = customer_settings.model_copy(update={"agent_provider": "mock"})
-    policy_agent = build_policy_agent(service.engine, local_settings)
+    if customer_settings.customer_triage_provider == "hybrid" and provider is not None:
+        triage_provider = HybridTriage(provider)
+    answerer = (
+        LLMPolicyAnswerer(provider)
+        if customer_settings.agent_provider == "openai_compatible" and provider is not None
+        else None
+    )
+    policy_agent = build_policy_agent(
+        service.engine,
+        customer_settings,
+        answerer=answerer,
+    )
     thread = _resolve_thread(threads, sid, request.order_id)
     return run_after_sales_conversation(
         service,

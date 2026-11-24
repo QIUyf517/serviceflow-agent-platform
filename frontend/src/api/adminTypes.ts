@@ -58,7 +58,7 @@ export interface TicketListResponse {
 
 export interface TicketRequestProjection {
   request_id: string
-  action: 'cancel' | 'return'
+  action: 'cancel' | 'return' | 'modify_address'
   order_id: string
   status: string
   proposal_id: string

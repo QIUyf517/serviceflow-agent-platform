@@ -3,7 +3,13 @@ import json
 import pytest
 from app.llm import ModelReply, ProviderError
 from app.multi_agent.models import TriageResult
-from app.multi_agent.triage import HybridTriage, LLMTriage, MockTriage, TriageError
+from app.multi_agent.triage import (
+    HybridTriage,
+    LLMTriage,
+    MockTriage,
+    ThreadScopedTriage,
+    TriageError,
+)
 
 
 @pytest.mark.parametrize(
@@ -145,6 +151,30 @@ def test_llm_missing_order_is_normalized_even_if_model_claims_no_clarification()
     result = LLMTriage(provider).classify("查询订单状态")
     assert result.needs_clarification
     assert result.missing_information == ["order_id"]
+
+
+def test_mock_triage_recognizes_order_specific_shipping_without_an_id():
+    result = MockTriage().classify("这个订单从哪里发货")
+
+    assert result.intents == ["order_query"]
+    assert result.requested_action == "get_order_logistics"
+    assert result.order_id is None
+    assert result.needs_clarification is True
+    assert result.missing_information == ["order_id"]
+
+
+def test_order_thread_keeps_short_shipping_followup_but_not_general_policy():
+    scoped = ThreadScopedTriage(MockTriage(), "#W100")
+
+    followup = scoped.classify("哪里发货")
+    assert followup.intents == ["order_query"]
+    assert followup.order_id == "#W100"
+    assert followup.requested_action == "get_order_logistics"
+    assert followup.needs_clarification is False
+
+    general = scoped.classify("你们一般从哪里发货")
+    assert general.intents == ["policy_inquiry"]
+    assert general.order_id is None
 
 
 def test_llm_provider_error_is_sanitized():

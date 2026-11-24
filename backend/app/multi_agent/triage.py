@@ -23,6 +23,76 @@ ORDER_NOT_WANTED = re.compile(
     r"|(?:不要了|不想要了|不需要了|不再需要了?).{0,8}(?:订单|这单|那单)"
     r"|(?:不要|不想要|不需要)(?:这个|这笔|这张|那个)?订单了?"
 )
+THREAD_LOGISTICS_QUESTION = re.compile(
+    r"(?:从哪(?:里|儿)?发货|哪(?:里|儿)发货|发货地(?:点)?|发货仓|发什么快递|"
+    r"哪个快递|哪家快递|快递公司)"
+)
+GENERAL_LOGISTICS_QUALIFIER = re.compile(
+    r"(?:你们|店铺|商家|一般|通常|默认|大多|规则|政策|说明)"
+)
+ADDRESS_FIELD_ALIASES = {
+    "country": ("country", "国家"),
+    "state": ("state", "省/州", "省份", "省", "州"),
+    "city": ("city", "城市", "市"),
+    "address1": ("address1", "详细地址", "街道地址", "收货地址"),
+    "address2": ("address2", "地址补充", "门牌补充"),
+}
+
+
+def _address_fields(message: str) -> dict[str, str]:
+    """Extract an explicit customer address without requiring a postal code."""
+    extracted: dict[str, str] = {}
+    all_aliases = sorted(
+        (alias for aliases in ADDRESS_FIELD_ALIASES.values() for alias in aliases),
+        key=len,
+        reverse=True,
+    )
+    boundary = "|".join(re.escape(alias) for alias in all_aliases)
+    for key, aliases in ADDRESS_FIELD_ALIASES.items():
+        label = "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True))
+        match = re.search(
+            rf"(?:^|[,，;；\s])(?:{label})\s*[:：=]\s*(.+?)"
+            rf"(?=\s*(?:[,，;；]\s*)?(?:{boundary})\s*[:：=]|[,，;；\n]|$)",
+            message,
+            re.I,
+        )
+        if match and match.group(1).strip():
+            extracted[key] = match.group(1).strip()
+
+    if {"state", "city", "address1"}.issubset(extracted):
+        extracted.setdefault("country", "中国")
+        return extracted
+
+    compact_match = re.search(
+        r"(?:收货地址|配送地址|订单地址|地址)\s*(?:改为|改成|修改为|是|为|到|[:：=])\s*"
+        r"(?P<address>[^。；;!?！？]{6,160})",
+        message,
+    )
+    if compact_match is None:
+        return extracted
+    compact = compact_match.group("address").strip(" ，,")
+    if compact.startswith("中国"):
+        compact = compact[2:].lstrip()
+    municipality = re.match(r"(?P<state>北京市|上海市|天津市|重庆市)(?P<rest>.+)", compact)
+    if municipality:
+        state = municipality.group("state")
+        rest = municipality.group("rest").strip()
+        if rest:
+            extracted.update(country="中国", state=state, city=state, address1=rest)
+        return extracted
+    regular = re.match(
+        r"(?P<state>.+?(?:省|自治区|特别行政区))"
+        r"(?P<city>.+?(?:市|自治州|地区|盟))(?P<rest>.+)",
+        compact,
+    )
+    if regular and regular.group("rest").strip():
+        extracted.update(
+            country="中国",
+            state=regular.group("state").strip(),
+            city=regular.group("city").strip(),
+            address1=regular.group("rest").strip(),
+        )
+    return extracted
 
 
 class TriageError(Exception):
@@ -194,7 +264,11 @@ class MockTriage:
             intents.append("cancel_order")
         if (
             any(word in lowered for word in ("修改", "更改", "change", "modify"))
-            and ("订单" in phrase or "order" in lowered)
+            and (
+                "订单" in phrase
+                or "order" in lowered
+                or "地址" in phrase
+            )
             and not (policy_question and not execution_request)
         ):
             intents.append("modify_order")
@@ -234,6 +308,8 @@ class MockTriage:
                     "中的商品",
                     "物流",
                     "配送",
+                    "发货",
+                    "快递",
                     "tracking",
                     "items",
                     "list",
@@ -288,7 +364,10 @@ class MockTriage:
                 }
             ):
                 action = previous.requested_action
-            elif any(word in lowered for word in ("物流", "配送", "tracking")):
+            elif any(
+                word in lowered
+                for word in ("物流", "配送", "发货", "快递", "tracking")
+            ):
                 action = "get_order_logistics"
             elif any(word in lowered for word in ("订单中的商品", "中的商品", "items")):
                 action = "get_order_items"
@@ -337,10 +416,7 @@ class MockTriage:
             and "modify_order" in intents
         ):
             extracted["modification_type"] = "items"
-        for key in ("address1", "address2", "city", "state", "country", "zip"):
-            match = re.search(rf"\b{key}\s*=\s*([^,，;；]+)", phrase, re.I)
-            if match:
-                extracted[key] = match.group(1).strip()
+        extracted.update(_address_fields(phrase))
         result = TriageResult(
             intent="complex_request" if len(intents) > 1 else intents[0],
             intents=intents,
@@ -382,6 +458,11 @@ class LLMTriage:
             "A question about how cancellation or returns work is policy_inquiry, "
             "not a request to execute. "
             "For cancel_order set requested_action=cancel_order. "
+            "For a request to change the shipping address, use intent=modify_order, "
+            "requested_action=modify_order and put modification_type='address' inside "
+            "extracted_parameters. Put only address facts explicitly supplied by the customer "
+            "into extracted_parameters as country, state, city, address1 and optional address2. "
+            "Postal code is not required and must not be invented. "
             "When the customer clearly gives a reason, "
             "map a mistaken purchase to reason='ordered by mistake' and no longer wanting it to "
             "reason='no longer needed'. Otherwise omit reason; never invent one. "
@@ -465,7 +546,29 @@ class ThreadScopedTriage:
 
     def classify(self, message: str, previous: TriageResult | None = None) -> TriageResult:
         result = self.provider.classify(message, previous)
-        if result.order_id is None and result.requested_action != "list_orders":
+        if (
+            result.intents == ["policy_inquiry"]
+            and THREAD_LOGISTICS_QUESTION.search(message)
+            and not GENERAL_LOGISTICS_QUALIFIER.search(message)
+        ):
+            result = result.model_copy(
+                update={
+                    "intent": "order_query",
+                    "intents": ["order_query"],
+                    "order_id": self.order_id,
+                    "requested_action": "get_order_logistics",
+                    "missing_information": [],
+                    "needs_clarification": False,
+                    "reasoning_summary": (
+                        "Short logistics follow-up stays within the server-bound order thread."
+                    ),
+                }
+            )
+        if (
+            result.order_id is None
+            and result.requested_action != "list_orders"
+            and bool(ORDER_INTENTS.intersection(result.intents))
+        ):
             missing = [
                 item for item in result.missing_information if item != "order_id"
             ]

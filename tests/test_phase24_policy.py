@@ -307,7 +307,7 @@ def test_prompt_injection_is_data_and_never_grants_tools_or_writes(service):
     assert "untrusted data" in provider.messages[0]["content"]
     assert "<customer_question>" in provider.messages[1]["content"]
     assert result["task_status"] == "policy_answered"
-    assert result["final_response"].startswith("Model-generated explanation (not authorization):")
+    assert result["final_response"].startswith("智能知识答复：")
     with Session(service.engine) as db:
         assert db.scalar(select(func.count()).select_from(ProposalRow)) == 0
 
